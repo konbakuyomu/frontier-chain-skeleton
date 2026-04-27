@@ -1,0 +1,5 @@
+creds.local.js
+_staging/
+*.bak
+*.bak-*
+.test.js

@@ -98,6 +98,78 @@ https://your-substore-domain/<api-prefix>/api/file/<filename>?target=mihomo#scra
 - 任何形式的凭据 commit 到本仓库都是事故 —— 立即 rotate 全部凭据 + force-push 重写历史 + 通知所有引用方。
 - Sub-Store 端 `$arguments` 走 URL fragment（不入服务端）；Sparkle 端凭据放本地 patch 脚本（不进 git）。
 
+## Sparkle 端使用方式（Windows）
+
+> 背景：Sparkle 多个 override 脚本运行在**独立 JS sandbox**，`globalThis` 不跨脚本共享。
+> 因此不能用"远程骨架 + 本地 patch 注入 globalThis.__creds"两脚本拆分模式。
+> 改为：本地拼接 `creds.local.js + main.js` → 单文件 inline 给 Sparkle，凭据 IIFE 与 main(config) 共享同一 sandbox。
+>
+> VPS Sub-Store / iPhone 端**仍然**用 `$arguments` + 远程 jsdelivr URL（Sub-Store 内核原生支持，不受此问题影响）。
+
+### 首次配置
+
+1. 把仓库 clone 到 `D:\Dev\50_Scripts\56_Subscriptions\frontier-chain-skeleton\`
+2. 在仓库根目录复制凭据模板，填入真凭据：
+   ```powershell
+   Copy-Item creds.local.example.js creds.local.js
+   # 然后用编辑器打开 creds.local.js 填入真实 SCRAPEGW_RAW / frontier_* / vps_*
+   ```
+   `creds.local.js` 已被 `.gitignore` 排除，不会进 git。
+3. 在 PowerShell 跑 dry-run：
+   ```powershell
+   cd D:\Dev\50_Scripts\56_Subscriptions\frontier-chain-skeleton
+   .\sync-to-sparkle.ps1
+   ```
+   输出到 `_staging\19d8b14dfd4.js.test`，不动生产文件。
+4. 用 VS Code diff 对比 staging 与当前生产文件：
+   ```powershell
+   code --diff _staging\19d8b14dfd4.js.test D:\scoop\apps\sparkle\current\data\override\19d8b14dfd4.js
+   ```
+   确认凭据均在顶部 IIFE、`function main(config)` 存在、`globalThis.main = main` 在末尾。
+5. 跑生产模式（自动备份现有 `.bak-<timestamp>`）：
+   ```powershell
+   .\sync-to-sparkle.ps1 -Production
+   ```
+6. Sparkle UI → 当前订阅 → 刷新订阅，看日志：
+   - 应有 `[skeleton] 新增规则目标校验通过, 共 N 条`
+   - 不应有 `[skeleton] 未检测到任何凭据注入通道` 警告
+
+### 日常工作流
+
+```powershell
+# 改完 main.js 后：
+.\sync-to-sparkle.ps1 -Production -Pull   # 先 git pull 拿别处 push 的最新版，再 sync 到 Sparkle
+git add main.js
+git commit -m "..."
+git push                                  # 同步给 VPS Sub-Store / iPhone 通过 jsdelivr 拉新版
+```
+
+```powershell
+# ScrapeGW session 过期（120min lifetime）：
+# 改 creds.local.js 里的 SCRAPEGW_RAW 一行
+.\sync-to-sparkle.ps1 -Production         # 30 秒搞定，无需碰 main.js / git
+```
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| (none) | | dry-run，输出到 `_staging\` 不动生产 |
+| `-Production` | false | 覆盖 Sparkle 生产文件，自动 .bak |
+| `-Pull` | false | sync 前先 `git pull --ff-only` |
+| `-NoBackup` | false | 生产模式下跳过 .bak（不推荐） |
+
+### 文件清单
+
+| 文件 | 入 git？ | 用途 |
+|---|---|---|
+| `main.js` | yes | 业务逻辑骨架（被 jsdelivr 公开） |
+| `creds.local.example.js` | yes | 凭据模板（占位符） |
+| `creds.local.js` | **NO** | 真凭据（本机敏感） |
+| `sync-to-sparkle.ps1` | yes | 拼接 + 同步脚本 |
+| `_staging/` | **NO** | dry-run 输出目录 |
+| `*.bak-*` | **NO** | sync 前自动备份 |
+
 ## 许可
 
 MIT
