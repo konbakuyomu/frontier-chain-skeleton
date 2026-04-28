@@ -313,6 +313,63 @@ function prependUniqueRules(config, rules) {
   return uniqueRules;
 }
 
+// ------------------------------------------------------------
+// Shadowrocket 兼容：把 mihomo 的 `include-all: true` 组就地展开
+// 成节点名字数组，并删除 include-all / filter / exclude-filter 三个
+// 私有字段（Shadowrocket ≥ 2.2.x 不识别这三个字段，留着会让组没节点 + 报警）
+// ------------------------------------------------------------
+function expandIncludeAllGroups(config) {
+  const groups = Array.isArray(config["proxy-groups"]) ? config["proxy-groups"] : [];
+  const allProxyNames = (Array.isArray(config.proxies) ? config.proxies : [])
+    .map(p => p && p.name)
+    .filter(name => typeof name === "string" && name.length > 0);
+
+  let expanded = 0;
+  for (const group of groups) {
+    if (!group || group["include-all"] !== true) continue;
+
+    let candidates = allProxyNames.slice();
+    if (typeof group.filter === "string" && group.filter.length > 0) {
+      try {
+        const re = compileFilter(group.filter);
+        candidates = candidates.filter(name => re.test(name));
+      } catch (e) {
+        logWarn(`组 "${group.name}" 的 filter 编译失败：${e && e.message}，忽略 filter`);
+      }
+    }
+    if (typeof group["exclude-filter"] === "string" && group["exclude-filter"].length > 0) {
+      try {
+        const re = compileFilter(group["exclude-filter"]);
+        candidates = candidates.filter(name => !re.test(name));
+      } catch (e) {
+        logWarn(`组 "${group.name}" 的 exclude-filter 编译失败：${e && e.message}，忽略 exclude-filter`);
+      }
+    }
+
+    const existing = Array.isArray(group.proxies) ? group.proxies.slice() : [];
+    const seen = new Set(existing);
+    const merged = existing;
+    for (const name of candidates) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      merged.push(name);
+    }
+    group.proxies = merged;
+
+    delete group["include-all"];
+    delete group.filter;
+    delete group["exclude-filter"];
+
+    expanded += 1;
+    logInfo(`展开 include-all 组 "${group.name}"：${merged.length} 个节点`);
+  }
+
+  if (expanded > 0) {
+    logInfo(`expandIncludeAllGroups 处理完成，共展开 ${expanded} 个组`);
+  }
+  return config;
+}
+
 
 // ============================================================
 // 主入口
@@ -435,13 +492,13 @@ function main(config) {
       const aiProviders = {
         "ai-dustin": {
           type: "http", behavior: "domain", format: "mrs",
-          url: "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.mrs",
+          url: "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@mihomo-ruleset/ai.mrs",
           path: "./ruleset/ai-dustin.mrs", interval: 86400,
           proxy: selectGroup
         },
         "ai-openai": {
           type: "http", behavior: "classical", format: "text",
-          url: "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/OpenAI/OpenAI.list",
+          url: "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.list",
           path: "./ruleset/ai-openai.list", interval: 86400,
           proxy: selectGroup
         },
@@ -554,6 +611,12 @@ function main(config) {
       }
     }
   }
+
+  // ================================================
+  // ===== Shadowrocket 兼容（最后一步）=====
+  // 把所有 include-all 组就地展开为节点名字数组，删除 mihomo 私有字段
+  // ================================================
+  expandIncludeAllGroups(config);
 
   return config;
 }
