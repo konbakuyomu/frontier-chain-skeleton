@@ -1,7 +1,7 @@
 # iPhone Shadowrocket 双订阅导入指南
 
 > 适用版本: Shadowrocket ≥ 2.2.x
-> 架构: 配置订阅 (无凭据, 公开 jsdelivr) + 节点订阅 (含凭据, Sub-Store fragment 注入)
+> 架构: 配置订阅 (无凭据, 公开 jsdelivr) + 节点订阅 (凭据只在 Sub-Store 本地 arguments 中)
 > 上次更新: 2026-04-28
 
 ---
@@ -46,15 +46,22 @@ Sub-Store 后台 → Collections → + → 名称 `merged-airports` → 勾选�
 
 Sub-Store 后台 → Files → + → 选择 ShadowRocket → 名称随意（示例 `iphone-shadowrocket`）→ Source 选 `Collection` → 选 `merged-airports`。
 
-### 2.4 挂 Script Operator (家宽节点注入)
+### 2.4 挂 Script Operator (节点归一化 + 家宽节点注入)
 
-Files 详情页 → Process → Add Operator → Script Operator → 远程 URL：
+Collections 详情页 → Process → Add Operator → Script Operator：
+
+1. 从 commit-pinned URL 获取脚本正文：
 
 ```
 https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket-nodes-injector.js
 ```
 
-`type` 选 `节点处理脚本` (proxies array)。Save。
+2. 使用 **normal / inline** 模式粘贴脚本正文，不使用 link-mode 直接引用 URL。
+3. `type` 选 `节点处理脚本` (proxies array)。
+4. `arguments` 填入 `vps_server` / `vps_port` / `vps_password` / `vps_cipher`。
+5. Save。
+
+> Sub-Store v2.22.8 实测：Script Operator `mode: link` + 纯 URL 不会把 UI `arguments` 传给脚本；`URL#vps_server=...` 能工作但会把凭据持久化到 content 字段。当前推荐 inline 脚本正文 + 本地 arguments。
 
 ### 2.5 拼最终订阅 URL
 
@@ -64,19 +71,13 @@ Files 详情页 → 复制 ShadowRocket 订阅 URL，例：
 https://<sub-store-host>/<api-prefix>/api/file/iphone-shadowrocket?target=ShadowRocket
 ```
 
-在末尾追加 fragment 凭据（`#` 之后部分**绝不**发送给服务器，只在客户端解析）：
+或直接使用 Collection 下载 URL：
 
 ```
-#vps_server=<vps-ip>&vps_password=<password>
+https://<sub-store-host>/<api-prefix>/download/collection/merged-airports?target=ShadowRocket
 ```
 
-可选追加：`&vps_port=51388&vps_cipher=chacha20-ietf-poly1305`。
-
-最终形如：
-
-```
-https://sub.example.com/api/<random-hex>/api/file/iphone-shadowrocket?target=ShadowRocket#vps_server=1.2.3.4&vps_password=xxxxxx&vps_port=51388
-```
+不要在 iPhone 订阅 URL 后追加凭据 fragment。
 
 ### 2.6 后台预览验证
 
@@ -84,9 +85,10 @@ Sub-Store 后台 → Files → 该订阅 → Preview。应能看到机场所有�
 
 如**未**出现 Frontier 节点：
 
-- 确认 fragment 是否带了 `vps_server` 和 `vps_password`
-- Script Operator 是否正确加在 Process 流程里
-- jsdelivr URL 是否 200
+- 确认 Script Operator 是否正确加在 Collection 的 Process 流程里
+- 确认 Script Operator 是 inline/normal 模式，不是 link-mode 纯 URL
+- 确认本地 `arguments` 含 `vps_server` 和 `vps_password`
+- 确认脚本正文来自可访问的 commit-pinned jsdelivr URL
 
 ---
 
@@ -102,9 +104,9 @@ https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocke
 
 下载 → 设为使用中。
 
-### 3.2 导入节点订阅 (含凭据)
+### 3.2 导入节点订阅
 
-Shadowrocket → 首页 (Home) → 订阅 (Subscribe) → + → 粘贴第 2.5 步拼好的完整 URL（含 fragment）→ Update。
+Shadowrocket → 首页 (Home) → 订阅 (Subscribe) → + → 粘贴第 2.5 步的节点订阅 URL（不含凭据 fragment）→ Update。
 
 ### 3.3 确认节点列表
 
@@ -113,7 +115,7 @@ Shadowrocket → 首页 (Home) → 订阅 (Subscribe) → + → 粘贴第 2.5 �
 - 机场节点 (含 🇭🇰 / 🇯🇵 / 🇺🇸 各国家)
 - `🏠 [VPS→家宽] Frontier` (本仓库脚本注入)
 
-如未出现 Frontier 节点：检查订阅 URL 是否完整带了 `#vps_server=...&vps_password=...` fragment。
+如未出现 Frontier 节点：检查 Sub-Store Script Operator 是否为 inline 模式，且本地 arguments 是否填了 `vps_server` / `vps_password`。
 
 ### 3.4 确认策略组配置
 
@@ -134,7 +136,7 @@ Shadowrocket → 首页 → 配置使用中 → 应能看到自动建立的策�
 
 | 测试 | 预期 | 失败排查 |
 |---|---|---|
-| Safari 打开 https://ip.sb，临时切到 `🚀 节点选择` 选 `🏠 [VPS→家宽] Frontier` | 显示 `47.147.31.31` (家宽出口) | 节点未导入 / fragment 缺凭据 |
+| Safari 打开 https://ip.sb，临时切到 `🚀 节点选择` 选 `🏠 [VPS→家宽] Frontier` | 显示 `47.147.31.31` (家宽出口) | 节点未导入 / Sub-Store arguments 缺凭据 |
 | Safari 打开 https://claude.ai，看 Shadowrocket 流量页 | `claude.ai` 命中 `🤖 AI 服务` 组 → 出口家宽 | LingJingMaster AI.list URL 失效 (查 4.1) |
 | Safari 打开 https://chatgpt.com | 同上 (走 AI 组 → 家宽) | 同上 |
 | Safari 打开 https://gemini.google.com | 走 `🤖 AI 服务` 组 (注意: **不是** `🔍 谷歌服务`) | `ai-extensions.list` 排序未在 Google.list 之前 (查 4.2) |

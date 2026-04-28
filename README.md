@@ -80,13 +80,13 @@ Sparkle override 目录里同时放 `1a0_local_patch.js`（见同仓库 `example
 1. Files → 新建 mihomoProfile 文件
 2. 选定 sourceType=collection（合并双订阅 bitbyte ccrui + inetsnode）
 3. 远程脚本 URL: `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/main.js`
-4. 订阅给 iPhone 时，URL fragment 注入凭据：
+4. mihomoProfile 的敏感参数放在 Sub-Store 本地 Script Operator arguments，不要拼进公开 URL。
 
 ```
-https://your-substore-domain/<api-prefix>/api/file/<filename>?target=mihomo#scrapegw_host=<host>&scrapegw_port=<port>&scrapegw_user=<user>&scrapegw_pass=<pass>&frontier_server=<host>&frontier_password=<pass>&vps_server=<host>&vps_password=<pass>
+https://your-substore-domain/<api-prefix>/api/file/<filename>?target=mihomo
 ```
 
-> Fragment（`#` 之后部分）不会发送给服务器，由客户端本地解析后传给脚本的 `$arguments`，因此凭据**不会**写入 Sub-Store 服务端日志或数据库。
+> Sub-Store 服务端脚本不能依赖客户端订阅 URL fragment。敏感参数应放在后台本地 arguments 中，避免进入 GitHub、jsdelivr、iPhone 订阅 URL。
 
 ### iPhone Shadowrocket（双订阅模型）
 
@@ -102,22 +102,24 @@ https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocke
 
 下载完成后设为使用中。
 
-#### 2. 节点订阅（含凭据，Sub-Store fragment 注入）
+#### 2. 节点订阅（凭据留在 Sub-Store 本地 arguments）
 
 Sub-Store 后台先建：
 
 1. Subscriptions 添加双机场订阅（如 bitbyte ccrui + kuma/inetsnode）
 2. Collections 创建 `merged-airports` 合并两个订阅
 3. Files 新建 ShadowRocket 文件，sourceType=collection 引用 `merged-airports`
-4. Process Operator 添加 Script，远程 URL：
+4. Process Operator 添加 Script，使用 **normal / inline** 模式粘贴脚本正文：
    ```
    https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket-nodes-injector.js
    ```
+   这个 URL 只用于复制脚本正文和记录来源；Sub-Store v2.22.8 的 link-mode 不会把 UI `arguments` 传给远程脚本。
+5. Script Operator arguments 填入 `vps_server` / `vps_port` / `vps_password` / `vps_cipher`。
 
 打开 Shadowrocket → 首页 → 订阅 → + → 粘贴：
 
 ```
-https://<sub-store-host>/<api-prefix>/api/file/<filename>?target=ShadowRocket#vps_server=<host>&vps_password=<pass>
+https://<sub-store-host>/<api-prefix>/download/collection/merged-airports?target=ShadowRocket
 ```
 
 刷新订阅，确认节点列表中含 `🏠 [VPS→家宽] Frontier`。
@@ -135,9 +137,9 @@ https://<sub-store-host>/<api-prefix>/api/file/<filename>?target=ShadowRocket#vp
 
 ## 安全注意
 
-- 本仓库**不包含任何凭据**。所有密码 / token 都通过运行时参数注入。
+- 本仓库**不包含任何凭据**。所有密码 / token 都通过 Sub-Store 本地 arguments 或 Sparkle 本地凭据文件注入。
 - 任何形式的凭据 commit 到本仓库都是事故 —— 立即 rotate 全部凭据 + force-push 重写历史 + 通知所有引用方。
-- Sub-Store 端 `$arguments` 走 URL fragment（不入服务端）；Sparkle 端凭据放本地 patch 脚本（不进 git）。
+- Sub-Store 端不要把凭据放进 Script Operator link URL fragment；Sparkle 端凭据放本地 patch 脚本（不进 git）。
 
 ## Sparkle 端使用方式（Windows）
 
@@ -145,7 +147,7 @@ https://<sub-store-host>/<api-prefix>/api/file/<filename>?target=ShadowRocket#vp
 > 因此不能用"远程骨架 + 本地 patch 注入 globalThis.__creds"两脚本拆分模式。
 > 改为：本地拼接 `creds.local.js + main.js` → 单文件 inline 给 Sparkle，凭据 IIFE 与 main(config) 共享同一 sandbox。
 >
-> VPS Sub-Store / iPhone 端**仍然**用 `$arguments` + 远程 jsdelivr URL（Sub-Store 内核原生支持，不受此问题影响）。
+> VPS Sub-Store / iPhone 端使用内联脚本正文 + 本地 `$arguments`。Sub-Store v2.22.8 的 link-mode 远程 URL 不会把 UI `arguments` 传给脚本。
 
 ### 首次配置
 
