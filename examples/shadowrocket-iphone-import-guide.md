@@ -1,0 +1,218 @@
+# iPhone Shadowrocket 双订阅导入指南
+
+> 适用版本: Shadowrocket ≥ 2.2.x
+> 架构: 配置订阅 (无凭据, 公开 jsdelivr) + 节点订阅 (含凭据, Sub-Store fragment 注入)
+> 上次更新: 2026-04-28
+
+---
+
+## 0. 前置条件
+
+| 项 | 要求 |
+|---|---|
+| Shadowrocket 版本 | ≥ 2.2.x (App Store 安装) |
+| Sub-Store 后端 | 已部署, 反代 HTTPS 可访问 |
+| 机场订阅 | 至少 1 个 (推荐 2 个, 配 Sub-Store Collection 合并) |
+| Frontier 家宽节点 | VPS-IP / 端口 / SS 密码已知 |
+| 公开仓库 | `konbakuyomu/frontier-chain-skeleton` `main` 分支已含本指南所述 4 文件 |
+
+---
+
+## 1. 检查 jsdelivr 三个 URL 通断
+
+任意 PC 终端跑：
+
+```bash
+curl -sI https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket.conf | head -1
+curl -sI https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/ai-extensions.list | head -1
+curl -sI https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket-nodes-injector.js | head -1
+```
+
+三条均应返回 `HTTP/2 200`。如返回 404，说明 jsdelivr 缓存还没刷新（push 后通常 2-10 分钟），等等再试或带 `?nocache=1` 强制回源。
+
+---
+
+## 2. Sub-Store 后台准备节点订阅
+
+### 2.1 添加机场订阅
+
+Sub-Store 后台 → Subscriptions → + → 粘贴机场原始订阅 URL。重复添加多个机场。
+
+### 2.2 创建组合 Collection
+
+Sub-Store 后台 → Collections → + → 名称 `merged-airports` → 勾选上一步添加的全部机场订阅。
+
+### 2.3 创建 ShadowRocket file 类型订阅
+
+Sub-Store 后台 → Files → + → 选择 ShadowRocket → 名称随意（示例 `iphone-shadowrocket`）→ Source 选 `Collection` → 选 `merged-airports`。
+
+### 2.4 挂 Script Operator (家宽节点注入)
+
+Files 详情页 → Process → Add Operator → Script Operator → 远程 URL：
+
+```
+https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket-nodes-injector.js
+```
+
+`type` 选 `节点处理脚本` (proxies array)。Save。
+
+### 2.5 拼最终订阅 URL
+
+Files 详情页 → 复制 ShadowRocket 订阅 URL，例：
+
+```
+https://<sub-store-host>/<api-prefix>/api/file/iphone-shadowrocket?target=ShadowRocket
+```
+
+在末尾追加 fragment 凭据（`#` 之后部分**绝不**发送给服务器，只在客户端解析）：
+
+```
+#vps_server=<vps-ip>&vps_password=<password>
+```
+
+可选追加：`&vps_port=51388&vps_cipher=chacha20-ietf-poly1305`。
+
+最终形如：
+
+```
+https://sub.example.com/api/<random-hex>/api/file/iphone-shadowrocket?target=ShadowRocket#vps_server=1.2.3.4&vps_password=xxxxxx&vps_port=51388
+```
+
+### 2.6 后台预览验证
+
+Sub-Store 后台 → Files → 该订阅 → Preview。应能看到机场所有节点 + 末尾多一个 `🏠 [VPS→家宽] Frontier`。
+
+如**未**出现 Frontier 节点：
+
+- 确认 fragment 是否带了 `vps_server` 和 `vps_password`
+- Script Operator 是否正确加在 Process 流程里
+- jsdelivr URL 是否 200
+
+---
+
+## 3. iPhone Shadowrocket 端导入
+
+### 3.1 导入配置订阅 (无凭据)
+
+打开 Shadowrocket → 配置 (Config) → 右上角 + → 类型选 Subscription → URL：
+
+```
+https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket.conf
+```
+
+下载 → 设为使用中。
+
+### 3.2 导入节点订阅 (含凭据)
+
+Shadowrocket → 首页 (Home) → 订阅 (Subscribe) → + → 粘贴第 2.5 步拼好的完整 URL（含 fragment）→ Update。
+
+### 3.3 确认节点列表
+
+回到首页 → 节点列表应同时含：
+
+- 机场节点 (含 🇭🇰 / 🇯🇵 / 🇺🇸 各国家)
+- `🏠 [VPS→家宽] Frontier` (本仓库脚本注入)
+
+如未出现 Frontier 节点：检查订阅 URL 是否完整带了 `#vps_server=...&vps_password=...` fragment。
+
+### 3.4 确认策略组配置
+
+Shadowrocket → 首页 → 配置使用中 → 应能看到自动建立的策略组：
+
+```
+🚀 节点选择
+⚡ 自动选择
+🇭🇰 香港节点 / 🇹🇼 台湾节点 / 🇯🇵 日本节点 / 🇺🇸 美国节点 / 🌐 其他节点
+🏠 链路节点          <- 应自动捕获 🏠 [VPS→家宽] Frontier
+🤖 AI 服务          <- 默认指向 🏠 链路节点
+🔍 谷歌服务 / 📹 油管视频 / 🛑 广告拦截 / Ⓜ️ 微软服务 / 🍏 苹果服务 / 📲 电报消息 / 🐱 代码托管 / 🏠 私有网络 / 🔒 国内服务 / 🌍 非中国 / 🐟 漏网之鱼
+```
+
+---
+
+## 4. 验证清单
+
+| 测试 | 预期 | 失败排查 |
+|---|---|---|
+| Safari 打开 https://ip.sb，临时切到 `🚀 节点选择` 选 `🏠 [VPS→家宽] Frontier` | 显示 `47.147.31.31` (家宽出口) | 节点未导入 / fragment 缺凭据 |
+| Safari 打开 https://claude.ai，看 Shadowrocket 流量页 | `claude.ai` 命中 `🤖 AI 服务` 组 → 出口家宽 | LingJingMaster AI.list URL 失效 (查 4.1) |
+| Safari 打开 https://chatgpt.com | 同上 (走 AI 组 → 家宽) | 同上 |
+| Safari 打开 https://gemini.google.com | 走 `🤖 AI 服务` 组 (注意: **不是** `🔍 谷歌服务`) | `ai-extensions.list` 排序未在 Google.list 之前 (查 4.2) |
+| Codex CLI: `cloudaicompanion.googleapis.com` / `cloudcode-pa.googleapis.com` | 走 `🤖 AI 服务` 组 → 家宽 | `ai-extensions.list` 缺 cloudcode-pa / cloudaicompanion 域 |
+| Safari 打开 https://baidu.com | 走 `DIRECT` (无延迟) | China.list URL 失效 |
+| Safari 打开 https://browserleaks.com/dns | 不见 doh.pub / alidns.com / 国内 ISP DNS | 配置 `dns-server` 字段被覆盖 |
+
+### 4.1 LingJingMaster RULE-SET URL 通断
+
+```bash
+curl -sI https://raw.githubusercontent.com/LingJingMaster/Shadowrocket-Rules/refs/heads/main/AI.list | head -1
+curl -sI https://raw.githubusercontent.com/LingJingMaster/Shadowrocket-Rules/refs/heads/main/Google.list | head -1
+```
+
+GitHub raw 偶发被墙时，临时把 URL 改 `https://cdn.jsdelivr.net/gh/LingJingMaster/Shadowrocket-Rules@main/AI.list` 形式（jsdelivr 反代）。
+
+### 4.2 ai-extensions.list 排序检查
+
+打开 `shadowrocket.conf` → `[Rule]` 段。第 1 条 RULE-SET **必须**是 `ai-extensions.list`，第 4 条才是 LingJingMaster `Google.list`。如顺序反了，Gemini 会先命中 Google 组（走日本节点）而**不是** AI 组（走家宽）。
+
+---
+
+## 5. 常见问题
+
+### Q1：刷新配置订阅后，节点列表里的 Frontier 节点消失了
+
+A：不会消失。配置订阅和节点订阅是**独立**的，刷新配置只更新 [General] / [Proxy Group] / [Rule]，不动 [Proxy] 段（节点列表来自节点订阅）。
+
+如真消失，检查节点订阅是否还在 Shadowrocket → 首页 → 订阅列表。
+
+### Q2：节点订阅刷新后多出一堆重复 Frontier 节点
+
+A：脚本 (`shadowrocket-nodes-injector.js`) 内置去重逻辑 (`name === '🏠 [VPS→家宽] Frontier'`)。如出现重复，说明：
+
+- 机场订阅本身含名为 `🏠 [VPS→家宽] Frontier` 的节点（撞名）→ 重命名机场节点或改本仓库脚本里的 `node.name`
+- Sub-Store 后台 Process 里挂了多个 Script Operator → 删多余的
+
+### Q3：AI 没走家宽，走了机场节点
+
+A：
+
+1. 检查 Shadowrocket → 首页 → 配置使用中 → 策略组 → `🤖 AI 服务` → 当前选中应是 `🏠 链路节点`（点开看，里面应有 `🏠 [VPS→家宽] Frontier`）
+2. 如 `🏠 链路节点` 是空的 → 节点订阅没拉到 Frontier 节点 (回 3.3 排查)
+3. 如手动切到机场节点 → 长按 `🤖 AI 服务` 重置回 `🏠 链路节点`
+
+### Q4：iPhone 流量页显示大量 FINAL 兜底
+
+A：参考阶段 5.4 验证。FINAL 兜底比例 > 5% 通常是：
+
+- China.list / Global.list 拉取失败 → 走 4.1 检查 URL
+- 自定义域名（小众 SaaS）未被任何 RULE-SET 命中 → 加 [Host] 段或 [Rule] 段定向
+
+### Q5：浏览器报"DNS 泄露"
+
+A：配置中 `dns-server = https://doh.pub/dns-query,...` 默认走国内 DoH，符合"国内域名国内解析、海外域名走代理客户端解析"的设计。如要严格防泄露：
+
+- 改为 `dns-server = https://1.1.1.1/dns-query,https://8.8.8.8/dns-query`
+- 但这样国内域名解析会变慢（CDN 调度失准）
+
+---
+
+## 6. 双订阅刷新策略建议
+
+| 订阅类型 | 推荐自动刷新间隔 | 触发场景 |
+|---|---|---|
+| 配置订阅 (shadowrocket.conf) | 每周 1 次 | 跟 LingJingMaster 上游变化（GitHub Actions 已自动监控） |
+| 节点订阅 (Sub-Store) | 每天 1 次 | 跟机场流量重置 / 节点上下线 |
+
+Shadowrocket → 首页 → 订阅 → 编辑 → 自动更新间隔。
+
+---
+
+## 附录: URL 速查
+
+| 用途 | URL |
+|---|---|
+| 配置订阅 | `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket.conf` |
+| AI 扩展规则 | `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/ai-extensions.list` |
+| 节点注入脚本 | `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket-nodes-injector.js` |
+| 上游 LingJingMaster | https://github.com/LingJingMaster/Shadowrocket-Rules |
+| 上游 blackmatrix7 | https://github.com/blackmatrix7/ios_rule_script |

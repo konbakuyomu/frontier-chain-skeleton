@@ -1,0 +1,56 @@
+name: Sync LingJingMaster upstream check
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # 每天 04:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream LingJingMaster.conf
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/LingJingMaster/Shadowrocket-Rules/refs/heads/main/Shadowrocket.conf -o /tmp/upstream.conf
+
+      - name: Extract RULE-SET URLs from upstream
+        run: |
+          grep -E '^RULE-SET' /tmp/upstream.conf | awk -F',' '{print $2}' | sort -u > /tmp/upstream-urls.txt
+          echo "--- upstream RULE-SET URLs ---"
+          cat /tmp/upstream-urls.txt
+
+      - name: Extract RULE-SET URLs from local
+        run: |
+          grep -E '^RULE-SET' shadowrocket.conf | awk -F',' '{print $2}' | sort -u > /tmp/local-urls.txt
+          echo "--- local RULE-SET URLs ---"
+          cat /tmp/local-urls.txt
+
+      - name: Diff and open issue if drift detected
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! diff /tmp/upstream-urls.txt /tmp/local-urls.txt > /tmp/diff.txt; then
+            {
+              echo "## RULE-SET URL drift detected"
+              echo ""
+              echo '```diff'
+              cat /tmp/diff.txt
+              echo '```'
+              echo ""
+              echo "请手工评估上游 LingJingMaster 是否新增/移除/重命名 ruleset URL，决定是否同步到本仓库的 shadowrocket.conf。"
+              echo ""
+              echo "上游源: https://github.com/LingJingMaster/Shadowrocket-Rules/blob/main/Shadowrocket.conf"
+            } > /tmp/issue-body.md
+            gh issue create \
+              --title "[$(date +%Y-%m-%d)] LingJingMaster RULE-SET 漂移" \
+              --body-file /tmp/issue-body.md \
+              --label "upstream-sync" || true
+          else
+            echo "No drift between upstream LingJingMaster and local shadowrocket.conf RULE-SET URLs."
+          fi

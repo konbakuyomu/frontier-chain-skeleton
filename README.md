@@ -88,9 +88,50 @@ https://your-substore-domain/<api-prefix>/api/file/<filename>?target=mihomo#scra
 
 > Fragment（`#` 之后部分）不会发送给服务器，由客户端本地解析后传给脚本的 `$arguments`，因此凭据**不会**写入 Sub-Store 服务端日志或数据库。
 
-### iPhone Shadowrocket
+### iPhone Shadowrocket（双订阅模型）
 
-直接添加上一步的 Sub-Store mihomoProfile URL 为订阅源（含 `#args` fragment）。要求 Shadowrocket ≥ 2.2.x（2024+ 版本原生支持完整 Clash YAML）。
+> **2026-04-28 架构变更**：iPhone 端**不再**走 Sub-Store mihomoProfile YAML 路线。实测 Shadowrocket 对 mihomo 大量字段不识别（GEOSITE 失效、url-test 错选家宽节点、SELECT 组 currentSelection 漂移）。改为**配置和节点解耦**的双订阅模型：
+
+#### 1. 配置订阅（无凭据，公开 jsdelivr）
+
+打开 Shadowrocket → 配置 → 右上 + → 粘贴：
+
+```
+https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket.conf
+```
+
+下载完成后设为使用中。
+
+#### 2. 节点订阅（含凭据，Sub-Store fragment 注入）
+
+Sub-Store 后台先建：
+
+1. Subscriptions 添加双机场订阅（如 bitbyte ccrui + kuma/inetsnode）
+2. Collections 创建 `merged-airports` 合并两个订阅
+3. Files 新建 ShadowRocket 文件，sourceType=collection 引用 `merged-airports`
+4. Process Operator 添加 Script，远程 URL：
+   ```
+   https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket-nodes-injector.js
+   ```
+
+打开 Shadowrocket → 首页 → 订阅 → + → 粘贴：
+
+```
+https://<sub-store-host>/<api-prefix>/api/file/<filename>?target=ShadowRocket#vps_server=<host>&vps_password=<pass>
+```
+
+刷新订阅，确认节点列表中含 `🏠 [VPS→家宽] Frontier`。
+
+#### 关键设计
+
+- 配置用 `policy-regex-filter=Frontier|🏠` 自动捕获节点订阅里的家宽节点，无须手维护节点列表
+- 自动选择 / 国家分组用 negative lookahead 排除链路节点，避免 url-test 把家宽节点选成"最快"
+- AI 服务（Claude/ChatGPT/Codex/Gemini）默认全部走家宽链路（出口 47.147.31.31）
+- `ai-extensions.list` 排在 LingJingMaster `Google.list` / `AI.list` 之前命中，防止 Gemini 被 Google 组吃掉
+- 上游规则跟 LingJingMaster + blackmatrix7（社区维护，无须手维护域名）
+- 双订阅各自刷新，互不覆盖
+
+详细操作指南：`examples/shadowrocket-iphone-import-guide.md`
 
 ## 安全注意
 
@@ -158,6 +199,30 @@ git push                                  # 同步给 VPS Sub-Store / iPhone 通
 | `-Production` | false | 覆盖 Sparkle 生产文件，自动 .bak |
 | `-Pull` | false | sync 前先 `git pull --ff-only` |
 | `-NoBackup` | false | 生产模式下跳过 .bak（不推荐） |
+| `-Watch` | false | 常驻：循环 git pull → SHA256 比较 → 变化才 sync。**必须配合 `-Production`**，否则报错退出 |
+| `-WatchInterval <秒>` | 1800 | `-Watch` 间隔秒数。建议 ≥ 300 |
+
+### Watch 模式（自动跟版）
+
+让 Sparkle 端"近自动跟版"——后台常驻，远程 main.js 一旦更新（git push）就在下个轮询周期自动 sync 进 Sparkle override：
+
+```powershell
+# 前台跑（Ctrl+C 退出）
+.\sync-to-sparkle.ps1 -Production -Watch
+```
+
+注册为 Windows 登录后自启的 Scheduled Task：
+
+```powershell
+schtasks /create /sc onlogon /tn "frontier-skeleton-watcher" /tr "powershell -NoProfile -ExecutionPolicy Bypass -File D:\Dev\50_Scripts\56_Subscriptions\frontier-chain-skeleton\sync-to-sparkle.ps1 -Production -Watch"
+```
+
+行为契约：
+
+- 启动时记录 main.js 当前 SHA256，**不立即 sync**（首次手动 `-Production` 兜底）
+- 每轮：`git pull --ff-only` → 计算新 SHA256 → 不变则 `sleep $WatchInterval`，变化才走 `Invoke-SyncOnce`
+- pull 失败、sync 失败均不退出循环，下轮重试；只有前置检查失败（凭据/源文件缺失）才退出
+- 取消 `-Watch` 必须显式 `-Production`，dry-run + watch 直接报错退出
 
 ### 文件清单
 

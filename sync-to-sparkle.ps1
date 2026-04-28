@@ -19,6 +19,13 @@
 .PARAMETER NoBackup
   生产模式下跳过 .bak-<timestamp> 备份步骤。不推荐。
 
+.PARAMETER Watch
+  常驻模式：循环 git pull → 比较 main.js SHA256 → 变化才执行 sync。必须配合 -Production，
+  否则报错退出（dry-run + watch 没意义，永远没人读 _staging 输出）。Ctrl+C 退出。
+
+.PARAMETER WatchInterval
+  -Watch 模式下两次循环之间的休眠秒数。默认 1800（30 分钟），建议不要低于 300。
+
 .EXAMPLE
   .\sync-to-sparkle.ps1
   # dry-run：输出到 _staging\19d8b14dfd4.js.test
@@ -31,6 +38,10 @@
   .\sync-to-sparkle.ps1 -Production -Pull
   # 先 git pull 拿别处 push 的 main.js 最新版，再覆盖生产
 
+.EXAMPLE
+  .\sync-to-sparkle.ps1 -Production -Watch
+  # 常驻：每 30 分钟 git pull 一次，main.js 有变更才覆盖生产。Ctrl+C 退出。
+
 .NOTES
   脚本路径硬要求：必须放在仓库根（与 main.js / creds.local.js 同目录）。
 #>
@@ -39,7 +50,9 @@
 param(
   [switch]$Production,
   [switch]$Pull,
-  [switch]$NoBackup
+  [switch]$NoBackup,
+  [switch]$Watch,
+  [int]$WatchInterval = 1800
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,6 +76,26 @@ function Write-Ok    ($msg) { Write-Host "[ OK ] $msg" -ForegroundColor Green }
 function Write-Info  ($msg) { Write-Host "[INFO] $msg" -ForegroundColor Cyan }
 function Write-Warn2 ($msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
 function Write-Err   ($msg) { Write-Host "[FAIL] $msg" -ForegroundColor Red }
+
+# ----------------------------------------------------------------------------
+# Watch 前置校验（必须配 -Production；dry-run + watch 没意义）
+# ----------------------------------------------------------------------------
+
+if ($Watch -and -not $Production) {
+  Write-Err "-Watch 必须配合 -Production 使用（dry-run 模式下 watch 永远没人读 _staging 输出）"
+  exit 1
+}
+if ($Watch -and $WatchInterval -lt 5) {
+  Write-Err "-WatchInterval 不能 < 5 秒（避免拖死 git / Sparkle）"
+  exit 1
+}
+
+# ----------------------------------------------------------------------------
+# Invoke-SyncOnce：执行一次完整 sync（前置检查 + 可选 git pull + 拼接 + 写入 + 摘要）
+# 在 -Watch 模式下被循环调用；非 watch 模式调用一次。
+# ----------------------------------------------------------------------------
+
+function Invoke-SyncOnce {
 
 # ----------------------------------------------------------------------------
 # 1. 前置检查
@@ -243,4 +276,62 @@ if ($Production) {
   Write-Info "确认无误后跑：.\sync-to-sparkle.ps1 -Production"
 }
 
-exit 0
+}  # end function Invoke-SyncOnce
+
+# ----------------------------------------------------------------------------
+# 主流程：单次 vs Watch 循环
+# ----------------------------------------------------------------------------
+
+if (-not $Watch) {
+  Invoke-SyncOnce
+  exit 0
+}
+
+# Watch 模式：循环 git pull → SHA256 比较 → 变化才 sync
+Write-Info "进入 Watch 模式（间隔 $WatchInterval 秒，Ctrl+C 退出）"
+
+# 强制开启 -Pull（watch 的全部价值就是跟远程，不 pull 等于死循环）
+$script:Pull = $true
+
+function Get-MainSha256 {
+  if (-not (Test-Path $MainFile)) { return '<missing>' }
+  return (Get-FileHash -Path $MainFile -Algorithm SHA256).Hash
+}
+
+# 启动时先记一次哈希，但不强制 sync —— 由用户首次手动 -Production 兜底
+$lastHash = Get-MainSha256
+Write-Info "初始 main.js SHA256: $lastHash（不立即 sync，等下一轮变化触发）"
+
+while ($true) {
+  Write-Host ""
+  Write-Info "[watch] $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') 轮询开始"
+
+  # 1. git pull
+  try {
+    Push-Location $RepoRoot
+    git pull --ff-only 2>&1 | ForEach-Object { Write-Host "  $_" }
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warn2 "[watch] git pull 返回非零，本轮跳过 sync"
+    }
+  } catch {
+    Write-Warn2 "[watch] git pull 异常：$($_.Exception.Message)，本轮跳过 sync"
+  } finally {
+    Pop-Location
+  }
+
+  # 2. SHA256 比较
+  $currHash = Get-MainSha256
+  if ($currHash -eq $lastHash) {
+    Write-Info "[watch] main.js 未变化（SHA256 未变）→ sleep $WatchInterval s"
+  } else {
+    Write-Ok "[watch] main.js 变化：$lastHash → $currHash，触发 sync"
+    try {
+      Invoke-SyncOnce
+      $lastHash = $currHash
+    } catch {
+      Write-Err "[watch] sync 异常：$($_.Exception.Message)（保留旧 hash，下轮重试）"
+    }
+  }
+
+  Start-Sleep -Seconds $WatchInterval
+}

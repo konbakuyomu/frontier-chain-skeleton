@@ -1,0 +1,59 @@
+# Frontier Chain Skeleton — AI Extensions
+# 排在 LingJingMaster AI.list / Google.list 之前命中
+# 让 Gemini / Codex CLI / Anthropic IP 段 全部走 🤖 AI 服务（家宽链路）
+
+# > Gemini 全套（关键：覆盖 LingJingMaster Google.list 中默认走日本的 Gemini）
+DOMAIN,gemini.google.com
+DOMAIN,aistudio.google.com
+DOMAIN-SUFFIX,generativelanguage.googleapis.com
+DOMAIN-SUFFIX,makersuite.google.com
+DOMAIN,bard.google.com
+DOMAIN,ai.google.dev
+DOMAIN,alkalimakersuite-pa.clients6.google.com
+DOMAIN,alkalicore-pa.clients6.google.com
+DOMAIN,proactivebackend-pa.googleapis.com
+DOMAIN,geller-pa.googleapis.com
+
+# > Gemini CLI / Code Assist
+DOMAIN,cloudcode-pa.googleapis.com
+DOMAIN,cloudaicompanion.googleapis.com
+
+# > Anthropic IP 兜底（防 DNS 解析失败）
+IP-CIDR,160.79.104.0/21,no-resolve
+IP-CIDR6,2607:6bc0::/32,no-resolve
+IP-ASN,399358,no-resolve
+
+# > Codex / Advanced Voice 子链
+DOMAIN-SUFFIX,chatgpt.livekit.cloud
+DOMAIN-SUFFIX,host.livekit.cloud
+DOMAIN-SUFFIX,turn.livekit.cloud
+
+# > 反欺诈 / 验证码（Codex/Claude 鉴权依赖）
+DOMAIN,openai-api.arkoselabs.com
+DOMAIN-SUFFIX,client-api.arkoselabs.com
+DOMAIN-SUFFIX,challenges.cloudflare.com
+DOMAIN,static.cloudflareinsights.com
+
+# > 监控/遥测/统计（AI 应用通常依赖）
+DOMAIN-SUFFIX,sentry.io
+DOMAIN-SUFFIX,statsigapi.net
+DOMAIN-SUFFIX,datadoghq.com
+DOMAIN,browser-intake-datadoghq.com
+
+# > Anthropic 周边（LingJingMaster AI.list 已含 anthropic.com 主域，这里补 CDN/auth）
+DOMAIN,cdn.anthropic.com
+DOMAIN-SUFFIX,anthropic.com.cdn.cloudflare.net
+DOMAIN,servd-anthropic-website.b-cdn.net
+DOMAIN,anthropic.auth0.com
+DOMAIN,cdn.x.anthropic.com
+DOMAIN-SUFFIX,intercom.io
+DOMAIN-SUFFIX,intercomcdn.com
+
+# > OpenAI Azure 资源（LingJingMaster AI.list 部分含，这里补全）
+DOMAIN,openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net
+DOMAIN,openaicomproductionae4b.blob.core.windows.net
+DOMAIN,production-openaicom-storage.azureedge.net
+DOMAIN-SUFFIX,openaiapi-site.azureedge.net
+DOMAIN-SUFFIX,openaicom.imgix.net
+DOMAIN-SUFFIX,featuregates.org
+DOMAIN-SUFFIX,events.statsigapi.net
