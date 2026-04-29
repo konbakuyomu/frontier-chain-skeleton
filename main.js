@@ -647,6 +647,77 @@ function main(config) {
   }
 
   // ================================================
+  // ===== 用户自定义规则（最后注入 → 最高优先级）=====
+  // 唯一的"用户插槽"。新增分流规则统一在 userRules 数组内追加，不要再造新块。
+  // ================================================
+  {
+    const residentialNodeName = "🏠 [VPS→家宽] Frontier";
+    const residentialGroupName = "🏠 家宽-Frontier";
+    const paypalGroupName = "💵 PayPal";
+
+    // 1) upsert 通用家宽路由器（reusable，未来其他要走家宽的规则也能复用）
+    const pgList = Array.isArray(config["proxy-groups"]) ? config["proxy-groups"] : [];
+    if (!pgList.some(g => g && g.name === residentialGroupName)) {
+      pgList.push({
+        name: residentialGroupName,
+        type: "select",
+        proxies: [residentialNodeName, "DIRECT"],
+      });
+    }
+
+    // 2) upsert PayPal 专属选择组（UI 可切：家宽优先，附带 AI 服务整套国家/低倍率/手动选项）
+    //    复用 powerfullz 生成的 "AI服务" 组的 proxies，未来 powerfullz 加新国家时 PayPal 自动跟随
+    const aiGroup = pgList.find(g => g && g.name === "AI服务");
+    const aiProxiesClone = (aiGroup && Array.isArray(aiGroup.proxies)) ? [...aiGroup.proxies] : [];
+    if (!pgList.some(g => g && g.name === paypalGroupName)) {
+      pgList.push({
+        name: paypalGroupName,
+        type: "select",
+        proxies: aiProxiesClone.length > 0
+          ? [residentialGroupName, residentialNodeName, ...aiProxiesClone]
+          : [residentialGroupName, residentialNodeName, selectGroup, "DIRECT"],
+      });
+    }
+    config["proxy-groups"] = pgList;
+
+    // 3) 注册用户级 rule-providers（与 AI 同模式：mihomo 原生 .mrs，每日刷新）
+    // URL 中的 `@` 必须 percent-encode，否则 mihomo HTTP provider 解析失败
+    const userProviders = {
+      "paypal-meta": {
+        type: "http", behavior: "domain", format: "mrs",
+        url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/paypal.mrs",
+        path: "./ruleset/paypal-meta.mrs", interval: 86400,
+        proxy: selectGroup,
+      },
+      "paypal-cn-meta": {
+        type: "http", behavior: "domain", format: "mrs",
+        url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/paypal%40cn.mrs",
+        path: "./ruleset/paypal-cn-meta.mrs", interval: 86400,
+        proxy: selectGroup,
+      },
+    };
+    config["rule-providers"] = { ...(config["rule-providers"] || {}), ...userProviders };
+
+    // 4) 用户规则：PayPal → 💵 PayPal 组（UI 可切），自有域 → DIRECT
+    const userRules = [
+      `RULE-SET,paypal-meta,${paypalGroupName}`,
+      `RULE-SET,paypal-cn-meta,${paypalGroupName}`,
+      // 冷启动兜底：mrs 异步拉取完成前显式命中核心域
+      `DOMAIN-SUFFIX,paypal.com,${paypalGroupName}`,
+      `DOMAIN-SUFFIX,paypalobjects.com,${paypalGroupName}`,
+      `DOMAIN-SUFFIX,paypal-objects.com,${paypalGroupName}`,
+      // 自有域 → 直连
+      `DOMAIN-SUFFIX,konbakuyomu.us,DIRECT`,
+    ];
+
+    if (Array.isArray(config.rules)) {
+      validateRuleTargets(config, userRules);
+      const insertedUserRules = prependUniqueRules(config, userRules);
+      logInfo(`用户自定义规则注入：${insertedUserRules.length} 条 → ${paypalGroupName}/DIRECT`);
+    }
+  }
+
+  // ================================================
   // ===== Shadowrocket 兼容（最后一步）=====
   // 把所有 include-all 组就地展开为节点名字数组，删除 mihomo 私有字段
   // ================================================
