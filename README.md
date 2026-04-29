@@ -1,8 +1,8 @@
 # frontier-chain-skeleton
 
-通用 mihomo 全 config 覆写脚本，由 GitHub 公开仓库统一发布，供 Sparkle (Win/Mac) + Sub-Store (Linux/VPS) 双端通过 jsdelivr CDN 共享引用。
+通用 mihomo 全 config 覆写脚本，由 GitHub 公开仓库统一发布，当前主链是在 VPS/Sub-Store 侧生成最终 mihomo YAML，再发给 Sparkle (Windows) 和 FlClash (Android) 直接订阅。
 
-> 单点修改：仓库改一行 → `git push` → 10 分钟内 Sparkle 与 Sub-Store 各自刷新订阅都能拉到新版（jsdelivr 缓存窗口）。
+> 单点修改：仓库改一行 → `git push` → VPS/Sub-Store 处理链刷新 → Sparkle / FlClash 刷新最终订阅即可生效。旧 Sparkle 本地覆写脚本和 FlClash 合并脚本只作为回滚路径保留。
 
 ## 功能
 
@@ -18,9 +18,9 @@ function main(config) { /* 修改并返回 config */ }
 if (typeof globalThis !== 'undefined') globalThis.main = main;
 ```
 
-- Sparkle override 兼容（`type: remote` + `ext: js`）
-- Sub-Store mihomoProfile 文件类型兼容（backend 内部会调用 `globalThis.main(config)`）
-- iPhone Shadowrocket 不直接调脚本——它订阅的是 Sub-Store 输出的 mihomo YAML
+- Sub-Store mihomoProfile / File 处理链兼容（backend 内部会调用 `globalThis.main(config)`）
+- Sparkle / FlClash 主链不再直接调用脚本，而是订阅 Sub-Store 输出的最终 mihomo YAML
+- iPhone Shadowrocket 不订阅完整 mihomo YAML，继续使用配置订阅 + 节点订阅双订阅模型
 
 ## 必需参数（通过 $arguments 注入）
 
@@ -43,7 +43,114 @@ if (typeof globalThis !== 'undefined') globalThis.main = main;
 
 ## 使用方式
 
-### Sparkle (Windows / mac)
+### 当前主链：VPS/Sub-Store 生成最终 mihomo 订阅
+
+处理链固定为：
+
+```text
+merged-airports Collection
+  → powerfullz/override-rules convert.min.js
+  → frontier-chain-skeleton/main.js
+  → final mihomo YAML
+```
+
+客户端使用方式：
+
+- Sparkle：新增或切换到最终 mihomo 订阅 profile，停用本地 global overrides 作为主链。
+- FlClash：新增或切换到同一最终 mihomo 订阅 profile，覆写模式选 Standard / None，不绑定脚本。
+- Shadowrocket：继续用 `shadowrocket.conf` 配置订阅 + `merged-airports?target=ShadowRocket` 节点订阅。
+
+每个上游订阅进入 Collection 前先挂 `substore-source-marker.js`，用本地 arguments 传 `source_prefix`：
+
+| 上游订阅 | source_prefix |
+|---|---|
+| `ccrui` | `CCR` |
+| `kuma` | `KUMA` |
+
+节点命名由 Sub-Store Collection 的 `shadowrocket-nodes-injector.js` 统一完成，普通节点格式为：
+
+```text
+CCR | 美国-DP-广东
+KUMA | 日本-绿云-软银-深港
+KUMA | 美国-Frontier-家宽-链式
+```
+
+链路节点固定保留：
+
+```text
+🏠 [VPS→家宽] Frontier
+```
+
+### VPS/Sub-Store 标准维护流程
+
+本仓库是**非敏感源码层**的唯一入口；VPS 上的 `sub-store.json` 是运行态，里面可能包含 token、机场订阅 URL、Script Operator arguments 等敏感内容，不进 Git。
+
+日常维护按这个流程走：
+
+```powershell
+# 1. 本地只读验证：JS/Python 语法 + VPS 运行态检查
+.\scripts\verify-substore.ps1 `
+  -SshHost <vps-host> `
+  -SshPort <ssh-port> `
+  -SshUser root `
+  -SshKey <private-key-path>
+
+# 2. 改脚本后先 dry-run，不改 VPS
+.\scripts\deploy-substore.ps1
+
+# 3. 确认无误后才发布到 VPS
+.\scripts\deploy-substore.ps1 -Apply `
+  -SshHost <vps-host> `
+  -SshPort <ssh-port> `
+  -SshUser root `
+  -SshKey <private-key-path>
+```
+
+脚本边界：
+
+| 脚本 | 默认行为 | 作用 |
+|---|---|---|
+| `scripts/verify-substore.ps1` | 只读 | 本地语法检查 + VPS Sub-Store 结构/输出检查，不打印敏感值 |
+| `scripts/deploy-substore.ps1` | dry-run | 把本仓库脚本发布到 VPS Sub-Store；只有加 `-Apply` 才会修改远端 |
+| `scripts/restore-substore-backup.ps1` | 只列备份 | 列出或恢复 VPS `backups/` 里的 `sub-store.json` 备份；只有加 `-Apply -BackupName` 才恢复 |
+| `scripts/update-powerfullz-inline.py` | VPS 上运行 | 拉取 powerfullz 最新脚本，内联到 `frontier-chain-mihomo` 第一段 Script Operator |
+
+维护入口：
+
+| 要改什么 | 改哪里 | 发布目标 |
+|---|---|---|
+| 节点来源前缀 | `substore-source-marker.js` | 上游 subscription 的 source marker Script Operator |
+| 节点命名 / 过滤 / `VPS→家宽` 注入 | `shadowrocket-nodes-injector.js` | `merged-airports` Collection Script Operator |
+| DNS / AI / 家宽链式 / final mihomo | `main.js` | `frontier-chain-mihomo` 的自定义 Script Operator |
+| powerfullz 更新逻辑 | `scripts/update-powerfullz-inline.py` | VPS `/opt/1panel/apps/sub-store/sub-store/update-powerfullz-inline.py` |
+
+发布脚本会保留 Sub-Store 里已有的 `arguments`，不会把凭据从 VPS 拉回仓库。每次真正修改 `sub-store.json` 前会在 VPS `backups/` 下创建时间戳备份。
+
+回滚流程：
+
+```powershell
+# 先只列出最近备份，不改远端
+.\scripts\restore-substore-backup.ps1 `
+  -SshHost <vps-host> `
+  -SshPort <ssh-port> `
+  -SshUser root `
+  -SshKey <private-key-path>
+
+# 选定备份后才恢复；恢复前会再备份当前 sub-store.json
+.\scripts\restore-substore-backup.ps1 `
+  -BackupName sub-store.json.bak-deploy-YYYYMMDD-HHMMSS `
+  -Apply `
+  -SshHost <vps-host> `
+  -SshPort <ssh-port> `
+  -SshUser root `
+  -SshKey <private-key-path>
+```
+
+恢复完成后必须再跑 `verify-substore.ps1`，通过后再让客户端刷新订阅。
+
+### Sparkle 本地覆写回滚路径（Windows / mac）
+
+> 以下是旧方案和回滚方案。日常主链不再推荐让 Sparkle 本地串行跑 powerfullz + 本脚本。
 
 `override.yaml` 改造（参考同仓库 `examples/sparkle-local-patch/override.yaml.example`）：
 
@@ -77,10 +184,10 @@ Sparkle override 目录里同时放 `1a0_local_patch.js`（见同仓库 `example
 
 ### Sub-Store (VPS)
 
-1. Files → 新建 mihomoProfile 文件
-2. 选定 sourceType=collection（合并双订阅 bitbyte ccrui + inetsnode）
-3. 远程脚本 URL: `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/main.js`
-4. mihomoProfile 的敏感参数放在 Sub-Store 本地 Script Operator arguments，不要拼进公开 URL。
+1. Files → 新建或维护最终 mihomo profile 文件
+2. 选定 sourceType=collection，来源为 `merged-airports`
+3. 处理链先挂 `powerfullz/override-rules`，再挂 `frontier-chain-skeleton/main.js`
+4. mihomo profile 的敏感参数放在 Sub-Store 本地 Script Operator arguments，不要拼进公开 URL。
 
 ```
 https://your-substore-domain/<api-prefix>/api/file/<filename>?target=mihomo
@@ -126,7 +233,7 @@ https://<sub-store-host>/<api-prefix>/download/collection/merged-airports?target
 
 #### 关键设计
 
-- 配置用 `policy-regex-filter=Frontier|🏠` 自动捕获节点订阅里的家宽节点，无须手维护节点列表
+- 配置用 `policy-regex-filter=\[VPS→家宽\]` 自动捕获节点订阅里的家宽节点，无须手维护节点列表
 - 自动选择 / 国家分组用 negative lookahead 排除链路节点，避免 url-test 把家宽节点选成"最快"
 - AI 服务（Claude/ChatGPT/Codex/Gemini）默认全部走家宽链路（出口 47.147.31.31）
 - `ai-extensions.list` 排在 LingJingMaster `Google.list` / `AI.list` 之前命中，防止 Gemini 被 Google 组吃掉
@@ -141,7 +248,7 @@ https://<sub-store-host>/<api-prefix>/download/collection/merged-airports?target
 - 任何形式的凭据 commit 到本仓库都是事故 —— 立即 rotate 全部凭据 + force-push 重写历史 + 通知所有引用方。
 - Sub-Store 端不要把凭据放进 Script Operator link URL fragment；Sparkle 端凭据放本地 patch 脚本（不进 git）。
 
-## Sparkle 端使用方式（Windows）
+## Sparkle 端本地覆写回滚方式（Windows）
 
 > 背景：Sparkle 多个 override 脚本运行在**独立 JS sandbox**，`globalThis` 不跨脚本共享。
 > 因此不能用"远程骨架 + 本地 patch 注入 globalThis.__creds"两脚本拆分模式。

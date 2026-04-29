@@ -1,5 +1,6 @@
 creds.local.js
 _staging/
+__pycache__/
 *.bak
 *.bak-*
 .test.js

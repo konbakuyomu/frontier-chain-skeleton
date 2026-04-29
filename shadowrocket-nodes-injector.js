@@ -20,10 +20,29 @@
 const FRONTIER_NODE_NAME = '🏠 [VPS→家宽] Frontier';
 const INFO_PSEUDO_NODE_NAME_PATTERN = /(剩余流量|距离下次重置|套餐到期)/;
 const FLAG_PREFIX_PATTERN = /^(?:\uD83C[\uDDE6-\uDDFF]){2}\s*/;
+const DEFAULT_SOURCE_PREFIX_MAP = {
+  ccrui: 'CCR',
+  ccr: 'CCR',
+  kuma: 'KUMA',
+};
+const SOURCE_PREFIX_FIELDS = [
+  '__sourcePrefix',
+  '_sourcePrefix',
+  'sourcePrefix',
+  '__substore_source',
+  '_substore_source',
+  'subName',
+  'subscription',
+  'subscriptionName',
+  'source',
+  'sourceName',
+  'provider',
+];
 
 const REGION_DEFINITIONS = [
   {
     code: 'HK',
+    display: '香港',
     flag: '🇭🇰',
     detect: [
       /香港|Hong\s*Kong/i,
@@ -33,6 +52,7 @@ const REGION_DEFINITIONS = [
   },
   {
     code: 'TW',
+    display: '台湾',
     flag: '🇹🇼',
     detect: [
       /台湾|台灣|台北|台中|新北|彰化|Taiwan|Taipei/i,
@@ -42,6 +62,7 @@ const REGION_DEFINITIONS = [
   },
   {
     code: 'JP',
+    display: '日本',
     flag: '🇯🇵',
     detect: [
       /日本|东京|東京|大阪|Japan|Tokyo|Osaka/i,
@@ -51,6 +72,7 @@ const REGION_DEFINITIONS = [
   },
   {
     code: 'US',
+    display: '美国',
     flag: '🇺🇸',
     detect: [
       /美国|美國|沪美|廣美|广美|京美|美西|美东|美東|America|United\s*States|Los\s*Angeles|Seattle|Chicago|New\s*York|Phoenix/i,
@@ -64,51 +86,122 @@ const REGION_DEFINITIONS = [
   },
   {
     code: 'SG',
+    display: '新加坡',
     flag: '🇸🇬',
     detect: [/新加坡|狮城|獅城|Singapore/i, /(?:^|[\s/_-])SG(?:\d+|\b)/i],
     remove: [/新加坡|狮城|獅城|Singapore/i, /(?:^|[\s/_-])SG(?=$|[\s/_-])/i],
   },
   {
     code: 'KR',
+    display: '韩国',
     flag: '🇰🇷',
     detect: [/韩国|韓國|首尔|首爾|Korea|Seoul/i, /(?:^|[\s/_-])KR(?:\d+|\b)/i],
     remove: [/韩国|韓國|首尔|首爾|Korea|Seoul/i, /(?:^|[\s/_-])KR(?=$|[\s/_-])/i],
   },
   {
     code: 'DE',
+    display: '德国',
     flag: '🇩🇪',
     detect: [/德国|德國|法兰克福|法蘭克福|Germany|Deutschland|Frankfurt/i, /(?:^|[\s/_-])DE(?:\d+|\b)/i],
     remove: [/德国|德國|法兰克福|法蘭克福|Germany|Deutschland|Frankfurt/i, /(?:^|[\s/_-])DE(?=$|[\s/_-])/i],
   },
   {
     code: 'GB',
+    display: '英国',
     flag: '🇬🇧',
     detect: [/英国|英國|伦敦|倫敦|United\s*Kingdom|Britain|London/i, /(?:^|[\s/_-])(?:UK|GB)(?:\d+|\b)/i],
     remove: [/英国|英國|伦敦|倫敦|United\s*Kingdom|Britain|London/i, /(?:^|[\s/_-])(?:UK|GB)(?=$|[\s/_-])/i],
   },
   {
     code: 'FR',
+    display: '法国',
     flag: '🇫🇷',
     detect: [/法国|法國|巴黎|France|Paris/i, /(?:^|[\s/_-])FR(?:\d+|\b)/i],
     remove: [/法国|法國|巴黎|France|Paris/i, /(?:^|[\s/_-])FR(?=$|[\s/_-])/i],
   },
   {
     code: 'NL',
+    display: '荷兰',
     flag: '🇳🇱',
     detect: [/荷兰|荷蘭|阿姆斯特丹|Netherlands|Amsterdam/i, /(?:^|[\s/_-])NL(?:\d+|\b)/i],
     remove: [/荷兰|荷蘭|阿姆斯特丹|Netherlands|Amsterdam/i, /(?:^|[\s/_-])NL(?=$|[\s/_-])/i],
   },
   {
     code: 'CA',
+    display: '加拿大',
     flag: '🇨🇦',
     detect: [/加拿大|Canada|Toronto|Vancouver/i, /(?:^|[\s/_-])CA(?:\d+|\b)/i],
     remove: [/加拿大|Canada|Toronto|Vancouver/i, /(?:^|[\s/_-])CA(?=$|[\s/_-])/i],
   },
   {
     code: 'AU',
+    display: '澳大利亚',
     flag: '🇦🇺',
     detect: [/澳大利亚|澳洲|悉尼|墨尔本|Australia|Sydney|Melbourne/i, /(?:^|[\s/_-])AU(?:\d+|\b)/i],
     remove: [/澳大利亚|澳洲|悉尼|墨尔本|Australia|Sydney|Melbourne/i, /(?:^|[\s/_-])AU(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'RU',
+    display: '俄罗斯',
+    flag: '🇷🇺',
+    detect: [/俄罗斯|俄羅斯|Russia|Moscow/i, /(?:^|[\s/_-])RU(?:\d+|\b)/i],
+    remove: [/俄罗斯|俄羅斯|Russia|Moscow/i, /(?:^|[\s/_-])RU(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'TR',
+    display: '土耳其',
+    flag: '🇹🇷',
+    detect: [/土耳其|Turkey|Istanbul/i, /(?:^|[\s/_-])TR(?:\d+|\b)/i],
+    remove: [/土耳其|Turkey|Istanbul/i, /(?:^|[\s/_-])TR(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'BR',
+    display: '巴西',
+    flag: '🇧🇷',
+    detect: [/巴西|Brazil|Sao\s*Paulo|São\s*Paulo/i, /(?:^|[\s/_-])BR(?:\d+|\b)/i],
+    remove: [/巴西|Brazil|Sao\s*Paulo|São\s*Paulo/i, /(?:^|[\s/_-])BR(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'SE',
+    display: '瑞典',
+    flag: '🇸🇪',
+    detect: [/瑞典|Sweden|Stockholm/i, /(?:^|[\s/_-])SE(?:\d+|\b)/i],
+    remove: [/瑞典|Sweden|Stockholm/i, /(?:^|[\s/_-])SE(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'CH',
+    display: '瑞士',
+    flag: '🇨🇭',
+    detect: [/瑞士|Switzerland|Zurich|Zürich/i, /(?:^|[\s/_-])CH(?:\d+|\b)/i],
+    remove: [/瑞士|Switzerland|Zurich|Zürich/i, /(?:^|[\s/_-])CH(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'IN',
+    display: '印度',
+    flag: '🇮🇳',
+    detect: [/印度|India|Mumbai|Delhi/i, /(?:^|[\s/_-])IN(?:\d+|\b)/i],
+    remove: [/印度|India|Mumbai|Delhi/i, /(?:^|[\s/_-])IN(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'AR',
+    display: '阿根廷',
+    flag: '🇦🇷',
+    detect: [/阿根廷|Argentina|Buenos\s*Aires/i, /(?:^|[\s/_-])AR(?:\d+|\b)/i],
+    remove: [/阿根廷|Argentina|Buenos\s*Aires/i, /(?:^|[\s/_-])AR(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'UA',
+    display: '乌克兰',
+    flag: '🇺🇦',
+    detect: [/乌克兰|烏克蘭|Ukraine|Kyiv|Kiev/i, /(?:^|[\s/_-])UA(?:\d+|\b)/i],
+    remove: [/乌克兰|烏克蘭|Ukraine|Kyiv|Kiev/i, /(?:^|[\s/_-])UA(?=$|[\s/_-])/i],
+  },
+  {
+    code: 'MY',
+    display: '马来西亚',
+    flag: '🇲🇾',
+    detect: [/马来西亚|馬來西亞|Malaysia|Kuala\s*Lumpur/i, /(?:^|[\s/_-])MY(?:\d+|\b)/i],
+    remove: [/马来西亚|馬來西亞|Malaysia|Kuala\s*Lumpur/i, /(?:^|[\s/_-])MY(?=$|[\s/_-])/i],
   },
 ];
 
@@ -159,6 +252,7 @@ function cleanupProviderLabel(label) {
   return String(label || '')
     .replace(FLAG_PREFIX_PATTERN, '')
     .replace(/\s+[-–—]\s+|\s+[-–—]|[-–—]\s+/g, ' ')
+    .replace(/[｜|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -171,19 +265,141 @@ function extractProviderLabel(name, region) {
   return cleanupProviderLabel(provider);
 }
 
-function normalizeAirportNodeName(name) {
+function getSourcePrefixMap() {
+  var out = {};
+  for (var key in DEFAULT_SOURCE_PREFIX_MAP) {
+    if (Object.prototype.hasOwnProperty.call(DEFAULT_SOURCE_PREFIX_MAP, key)) {
+      out[key] = DEFAULT_SOURCE_PREFIX_MAP[key];
+    }
+  }
+  var extra = getCred('source_prefix_map');
+  if (!extra) return out;
+  try {
+    if (typeof extra === 'string') extra = JSON.parse(extra);
+    if (extra && typeof extra === 'object') {
+      for (var k in extra) {
+        if (Object.prototype.hasOwnProperty.call(extra, k)) {
+          out[String(k).toLowerCase()] = String(extra[k]).trim();
+        }
+      }
+    }
+  } catch (e) {
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[shadowrocket-injector] source_prefix_map 解析失败，使用默认映射');
+    }
+  }
+  return out;
+}
+
+function normalizeSourcePrefixValue(value, map) {
+  if (value == null) return '';
+  var text = String(value).trim();
+  if (!text) return '';
+  if (/^(CCR|KUMA)$/i.test(text)) return text.toUpperCase();
+  var lower = text.toLowerCase();
+  for (var key in map) {
+    if (Object.prototype.hasOwnProperty.call(map, key) && lower.indexOf(key) !== -1) {
+      return map[key];
+    }
+  }
+  return '';
+}
+
+function detectSourcePrefix(proxy) {
+  var map = getSourcePrefixMap();
+  if (proxy && typeof proxy === 'object') {
+    for (var i = 0; i < SOURCE_PREFIX_FIELDS.length; i++) {
+      var field = SOURCE_PREFIX_FIELDS[i];
+      var detected = normalizeSourcePrefixValue(proxy[field], map);
+      if (detected) return detected;
+    }
+  }
+  return '';
+}
+
+function removeSourceMarkers(proxy) {
+  if (!proxy || typeof proxy !== 'object') return;
+  delete proxy.__sourcePrefix;
+  delete proxy._sourcePrefix;
+  delete proxy.sourcePrefix;
+  delete proxy.__substore_source;
+  delete proxy._substore_source;
+}
+
+function extractRateLabel(name) {
+  var text = stripLeadingFlag(name);
+  var hit = text.match(/(?:^|[\s/])(\d+(?:\.\d+)?x(?:\s*🌟|⭐|☀️|☀)?)/i);
+  return hit ? hit[1].replace(/\s+/g, '') : '';
+}
+
+function removeRateLabel(label) {
+  return String(label || '')
+    .replace(/(?:^|[\s/])\d+(?:\.\d+)?x(?:\s*🌟|⭐|☀️|☀)?/ig, ' ')
+    .replace(/\s*\/\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function splitProviderParts(provider) {
+  var cleaned = removeRateLabel(provider)
+    .replace(/\b(?:Trojan|Vless|Vmess|Shadowsocks|SS)\b/ig, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  var parts = [];
+  if (!cleaned) return parts;
+
+  var knownAttrs = ['家宽', '商宽', '软银', '链式', '深港', 'Hinet', 'Seednet', 'HKT', 'DOIN', 'DonWeb'];
+  for (var i = 0; i < knownAttrs.length; i++) {
+    var attr = knownAttrs[i];
+    var re = new RegExp(attr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    if (re.test(cleaned)) {
+      cleaned = cleaned.replace(re, ' ');
+      parts.push(attr);
+    }
+  }
+
+  cleaned = cleanupProviderLabel(cleaned);
+  if (cleaned) parts.unshift(cleaned);
+  return parts;
+}
+
+function routeTagToPart(routeTag) {
+  return String(routeTag || '').replace(/^\[/, '').replace(/\]$/, '').trim();
+}
+
+function buildUnifiedName(sourcePrefix, regionName, provider, routeTag, rateLabel, fallbackName) {
+  var parts = splitProviderParts(provider);
+  var routePart = routeTagToPart(routeTag);
+  if (routePart && parts.indexOf(routePart) === -1) parts.push(routePart);
+  if (rateLabel && parts.indexOf(rateLabel) === -1) parts.push(rateLabel);
+  if (parts.length === 0) {
+    var fallback = cleanupProviderLabel(removeRateLabel(removeRouteTag(fallbackName)));
+    if (fallback) parts.push(fallback);
+  }
+  var body = [regionName].concat(parts).filter(Boolean).join('-');
+  return sourcePrefix ? sourcePrefix + ' | ' + body : body;
+}
+
+function normalizeAirportNodeName(name, proxy) {
   if (!name || name === FRONTIER_NODE_NAME || INFO_PSEUDO_NODE_NAME_PATTERN.test(name)) {
     return name;
   }
 
   const region = detectExitRegion(name);
-  if (!region) return name;
+  const sourcePrefix = detectSourcePrefix(proxy);
+  if (!region && !sourcePrefix) return name;
 
-  const provider = extractProviderLabel(name, region);
-  if (!provider) return name;
-
+  const provider = region ? extractProviderLabel(name, region) : cleanupProviderLabel(removeRouteTag(name));
   const routeTag = extractRouteTag(name);
-  return [region.flag, region.code, provider, routeTag].filter(Boolean).join(' ');
+  const rateLabel = extractRateLabel(name);
+  return buildUnifiedName(
+    sourcePrefix,
+    region ? region.display : '其他',
+    provider,
+    routeTag,
+    rateLabel,
+    name
+  );
 }
 
 function isInfoPseudoNode(proxy) {
@@ -213,11 +429,12 @@ function normalizeAirportProxies(proxies) {
       continue;
     }
     if (isInfoPseudoNode(proxy)) continue;
-    var normalizedName = normalizeAirportNodeName(proxy.name);
+    var normalizedName = normalizeAirportNodeName(proxy.name, proxy);
     if (normalizedName !== proxy.name) {
       renameMap[proxy.name] = normalizedName;
       proxy.name = normalizedName;  // 原地 mutate
     }
+    removeSourceMarkers(proxy);
     intermediate.push(proxy);
   }
 

@@ -111,12 +111,12 @@ const AI = {
 // ============================================================
 
 const REGION_META = {
-  US: { groupName: "🇺🇸 US前置", filter: "(?i)🇺🇸|美国|\\bUS\\b|United States" },
-  DE: { groupName: "🇩🇪 DE前置", filter: "(?i)🇩🇪|德国|\\bDE\\b|Germany" },
-  JP: { groupName: "🇯🇵 JP前置", filter: "(?i)🇯🇵|日本|\\bJP\\b|Japan|东京|大阪" },
-  HK: { groupName: "🇭🇰 HK前置", filter: "(?i)🇭🇰|香港|\\bHK\\b|Hong ?Kong" },
-  SG: { groupName: "🇸🇬 SG前置", filter: "(?i)🇸🇬|新加坡|\\bSG\\b|Singapore" },
-  UK: { groupName: "🇬🇧 UK前置", filter: "(?i)🇬🇧|英国|\\bUK\\b|United Kingdom|伦敦" },
+  US: { groupName: "🇺🇸 US前置", filter: "(?i)(?:^|\\|\\s*)美国-|🇺🇸|\\bUS\\b|United States" },
+  DE: { groupName: "🇩🇪 DE前置", filter: "(?i)(?:^|\\|\\s*)德国-|🇩🇪|\\bDE\\b|Germany" },
+  JP: { groupName: "🇯🇵 JP前置", filter: "(?i)(?:^|\\|\\s*)日本-|🇯🇵|\\bJP\\b|Japan|东京|大阪" },
+  HK: { groupName: "🇭🇰 HK前置", filter: "(?i)(?:^|\\|\\s*)香港-|🇭🇰|\\bHK\\b|Hong ?Kong" },
+  SG: { groupName: "🇸🇬 SG前置", filter: "(?i)(?:^|\\|\\s*)新加坡-|🇸🇬|\\bSG\\b|Singapore" },
+  UK: { groupName: "🇬🇧 UK前置", filter: "(?i)(?:^|\\|\\s*)英国-|🇬🇧|\\bUK\\b|\\bGB\\b|United Kingdom|伦敦" },
 };
 
 const EXCLUDE_FILTER =
