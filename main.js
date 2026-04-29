@@ -387,10 +387,22 @@ function main(config) {
   const existingGroupNames = new Set(frontGroups.map(g => g.name));
 
   // 3. 生成家宽节点
+  // 去重：当上游订阅来自 VPS Sub-Store（Collection `merged-airports` 的 Script Operator 已注入
+  // `🏠 [VPS→家宽] Frontier`）时，本地不再重复造同名 VPS 节点。机场→家宽链节点 Sub-Store 不造，
+  // 本地继续负责。
+  const upstreamProxyNames = new Set(
+    (config.proxies || []).map(p => p && p.name).filter(Boolean)
+  );
   const myNodes = [];
   for (const r of enabled) {
     const vpsNode = buildVpsNode(r);
-    if (vpsNode) myNodes.push(vpsNode);
+    if (vpsNode) {
+      if (upstreamProxyNames.has(vpsNode.name)) {
+        logInfo(`${r.name} 的 VPS 节点已由上游 Sub-Store 注入，本地跳过`);
+      } else {
+        myNodes.push(vpsNode);
+      }
+    }
 
     const groupName = REGION_META[r.region]?.groupName;
     if (existingGroupNames.has(groupName)) {
