@@ -667,10 +667,13 @@ function main(config) {
 
     // 2) upsert PayPal 专属选择组（UI 可切：家宽优先，附带 AI 服务整套国家/低倍率/手动选项）
     //    复用 powerfullz 生成的 "AI服务" 组的 proxies，未来 powerfullz 加新国家时 PayPal 自动跟随
+    //    位置：插入到 AI服务 之后，与同类业务组（苹果服务/谷歌服务/...）聚集，UI 显示连贯
     const aiGroup = pgList.find(g => g && g.name === "AI服务");
     const aiProxiesClone = (aiGroup && Array.isArray(aiGroup.proxies)) ? [...aiGroup.proxies] : [];
     if (!pgList.some(g => g && g.name === paypalGroupName)) {
-      pgList.push({
+      const aiIdx = pgList.findIndex(g => g && g.name === "AI服务");
+      const insertAt = aiIdx >= 0 ? aiIdx + 1 : pgList.length;
+      pgList.splice(insertAt, 0, {
         name: paypalGroupName,
         type: "select",
         proxies: aiProxiesClone.length > 0
@@ -679,6 +682,23 @@ function main(config) {
       });
     }
     config["proxy-groups"] = pgList;
+
+    // 2b) 把新组注入 GLOBAL.proxies — 关键步骤
+    //     FlClash 等客户端走 mihomo /proxies API 时，凭 GLOBAL.all 列出所有可见组；
+    //     不在 GLOBAL.proxies 的组虽然 yaml 里存在、规则能命中，但 UI Tab 不渲染
+    //     （来源：FlClash lib/common/task.dart 的 _toGroupsTask 过滤逻辑）
+    const globalGroup = pgList.find(g => g && g.name === "GLOBAL");
+    if (globalGroup && Array.isArray(globalGroup.proxies)) {
+      const aiIdxInGlobal = globalGroup.proxies.indexOf("AI服务");
+      const insertGlobalAt = aiIdxInGlobal >= 0 ? aiIdxInGlobal + 1 : globalGroup.proxies.length;
+      if (!globalGroup.proxies.includes(paypalGroupName)) {
+        globalGroup.proxies.splice(insertGlobalAt, 0, paypalGroupName);
+      }
+      if (!globalGroup.proxies.includes(residentialGroupName)) {
+        // 家宽-Frontier 是工具组件，放 GLOBAL.proxies 末尾即可
+        globalGroup.proxies.push(residentialGroupName);
+      }
+    }
 
     // 3) 注册用户级 rule-providers（与 AI 同模式：mihomo 原生 .mrs，每日刷新）
     // URL 中的 `@` 必须 percent-encode，否则 mihomo HTTP provider 解析失败
