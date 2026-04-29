@@ -175,6 +175,8 @@ function buildFrontProxyGroups(config, usedRegions) {
       interval: 300,
       tolerance: 50,
       lazy: true,
+      // 与 powerfullz "前置代理" 组同款 Koolson/Qure 图标，Sparkle UI 显示更协调
+      icon: "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Area.png",
     });
   }
   return groups;
@@ -655,6 +657,9 @@ function main(config) {
     const residentialGroupName = "🏠 家宽-Frontier";
     const paypalGroupName = "💵 PayPal";
 
+    // Koolson/Qure 图标库 base（与 powerfullz 国家组同款，Sparkle UI 显示协调）
+    const ICON_BASE = "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color";
+
     // 1) upsert 通用家宽路由器（reusable，未来其他要走家宽的规则也能复用）
     const pgList = Array.isArray(config["proxy-groups"]) ? config["proxy-groups"] : [];
     if (!pgList.some(g => g && g.name === residentialGroupName)) {
@@ -662,6 +667,7 @@ function main(config) {
         name: residentialGroupName,
         type: "select",
         proxies: [residentialNodeName, "DIRECT"],
+        icon: `${ICON_BASE}/Airport.png`,  // 与 powerfullz "落地节点" 同款
       });
     }
 
@@ -679,6 +685,7 @@ function main(config) {
         proxies: aiProxiesClone.length > 0
           ? [residentialGroupName, residentialNodeName, ...aiProxiesClone]
           : [residentialGroupName, residentialNodeName, selectGroup, "DIRECT"],
+        icon: `${ICON_BASE}/PayPal.png`,
       });
     }
     config["proxy-groups"] = pgList;
