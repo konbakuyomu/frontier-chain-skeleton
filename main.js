@@ -491,14 +491,11 @@ function main(config) {
     `DOMAIN-SUFFIX,gstatic.com,${googleGroup}`
   ];
 
-  // Shadowrocket 兼容：补充 inline RULE-SET 替代 powerfullz 的 GEOSITE,GOOGLE/APPLE
-  // （mihomo 端会从 rule-providers 字典读，Shadowrocket 端只认 inline URL）
-  const shadowrocketCompatRules = [
-    `RULE-SET,https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Google/Google.list,${googleGroup}`,
-    `RULE-SET,https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/GoogleFCM/GoogleFCM.list,${googleGroup}`,
-  ];
+  // 注：mihomo 不支持 inline URL 形式的 RULE-SET（要求 provider 必须在 rule-providers 字典里注册）。
+  // Google/GoogleFCM 走 powerfullz 的 GEOSITE,GOOGLE 即可（baseRules 已含），无需在此重复 RULE-SET。
+  // Shadowrocket 端是单独的 shadowrocket.conf，不通过 main.js 生成。
 
-  const fixedRules = [...testSiteRules, ...extensionFixRules, ...shadowrocketCompatRules];
+  const fixedRules = [...testSiteRules, ...extensionFixRules];
   validateRuleTargets(config, fixedRules);
   const insertedFixedRules = prependUniqueRules(config, fixedRules);
 
@@ -508,16 +505,43 @@ function main(config) {
   if (AI.enabled) {
     const aiGroup = findAIGroup(config, selectGroup, AI.targetGroup);
     if (aiGroup) {
-      // 注：原 ai-dustin (.mrs) / ai-openai (.list) 两条 rule-providers 字典注册已移除——
-      // Shadowrocket 不识别 mihomo 的 rule-providers 字典语法（实测 RULE-SET,<dict-name>,POLICY 全部 0 命中），
-      // 只识别 inline URL 形式（RULE-SET,<full-url>,POLICY）。
-      // 同时 .mrs 二进制格式 Shadowrocket 也不支持，因此 ai-dustin 整条用 blackmatrix7 的 .list 三件套替代。
+      // mihomo RULE-SET 必须引用 rule-providers 字典里注册的 provider name，
+      // 不支持 inline URL（实测 mihomo profile-check 会报 "rule set <url> not found"）。
+      // 我们注册 4 个 AI providers（dustin 全集 + blackmatrix7 三家拆分），让规则集提前异步拉。
+      const aiProviders = {
+        "ai-dustin": {
+          type: "http", behavior: "domain", format: "mrs",
+          url: "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.mrs",
+          path: "./ruleset/ai-dustin.mrs", interval: 86400,
+          proxy: selectGroup
+        },
+        "ai-openai": {
+          type: "http", behavior: "classical", format: "text",
+          url: "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.list",
+          path: "./ruleset/ai-openai.list", interval: 86400,
+          proxy: selectGroup
+        },
+        "ai-claude": {
+          type: "http", behavior: "classical", format: "text",
+          url: "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.list",
+          path: "./ruleset/ai-claude.list", interval: 86400,
+          proxy: selectGroup
+        },
+        "ai-gemini": {
+          type: "http", behavior: "classical", format: "text",
+          url: "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Gemini/Gemini.list",
+          path: "./ruleset/ai-gemini.list", interval: 86400,
+          proxy: selectGroup
+        },
+      };
+      config["rule-providers"] = { ...(config["rule-providers"] || {}), ...aiProviders };
 
       const aiRules = [
-        // 层1：inline RULE-SET（Shadowrocket + mihomo 双端均能识别）
-        `RULE-SET,https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.list,${aiGroup}`,
-        `RULE-SET,https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.list,${aiGroup}`,
-        `RULE-SET,https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Gemini/Gemini.list,${aiGroup}`,
+        // 层1：远程 rule-providers（mihomo 标准写法）
+        `RULE-SET,ai-dustin,${aiGroup}`,
+        `RULE-SET,ai-openai,${aiGroup}`,
+        `RULE-SET,ai-claude,${aiGroup}`,
+        `RULE-SET,ai-gemini,${aiGroup}`,
 
         // 2a：Anthropic 核心域名
         `DOMAIN-SUFFIX,anthropic.com,${aiGroup}`,

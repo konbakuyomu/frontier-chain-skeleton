@@ -193,31 +193,86 @@ function isInfoPseudoNode(proxy) {
 function normalizeAirportProxies(proxies) {
   if (!Array.isArray(proxies)) return proxies;
 
-  let frontierSeen = false;
-  return proxies.reduce(function (normalized, proxy) {
+  // 关键策略：在 Sub-Store v2.22.8 沙箱里 operator 必须**原地 mutate proxy 对象**——
+  // Sub-Store 内部保留了原始对象引用，最终序列化（target=ClashMeta）从那些原始对象读字段。
+  // 用 Object.assign 返回新对象的写法在测试中观察到 dialer-proxy 修改不被序列化采纳。
+  var frontierSeen = false;
+  var renameMap = {};
+  var intermediate = [];
+  for (var i = 0; i < proxies.length; i++) {
+    var proxy = proxies[i];
     if (!proxy || typeof proxy.name !== 'string') {
-      normalized.push(proxy);
-      return normalized;
+      intermediate.push(proxy);
+      continue;
     }
-
     if (proxy.name === FRONTIER_NODE_NAME) {
       if (!frontierSeen) {
         frontierSeen = true;
-        normalized.push(proxy);
+        intermediate.push(proxy);
       }
-      return normalized;
+      continue;
     }
-
-    if (isInfoPseudoNode(proxy)) return normalized;
-
-    const normalizedName = normalizeAirportNodeName(proxy.name);
+    if (isInfoPseudoNode(proxy)) continue;
+    var normalizedName = normalizeAirportNodeName(proxy.name);
     if (normalizedName !== proxy.name) {
-      normalized.push(Object.assign({}, proxy, { name: normalizedName }));
-    } else {
-      normalized.push(proxy);
+      renameMap[proxy.name] = normalizedName;
+      proxy.name = normalizedName;  // 原地 mutate
     }
-    return normalized;
-  }, []);
+    intermediate.push(proxy);
+  }
+
+  // Pass 2：修 dialer-proxy 引用——同样原地 mutate
+  var validNames = {};
+  for (var j = 0; j < intermediate.length; j++) {
+    var p = intermediate[j];
+    if (p && typeof p.name === 'string') validNames[p.name] = true;
+  }
+  var renameKeyCount = 0;
+  for (var rk in renameMap) {
+    if (Object.prototype.hasOwnProperty.call(renameMap, rk)) renameKeyCount++;
+  }
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[shadowrocket-injector] Pass2: rename_pairs=' + renameKeyCount + ' valid_names=' + Object.keys(validNames).length);
+  }
+
+  var out = [];
+  var rewroteCount = 0;
+  var droppedCount = 0;
+  for (var k = 0; k < intermediate.length; k++) {
+    var node = intermediate[k];
+    // 根因：Sub-Store v2.22.8 内部把 dialer-proxy 同步存到 underlying-proxy 字段，
+    // mihomo producer 序列化时优先用 underlying-proxy 覆盖 dialer-proxy。
+    // 修复：两个字段都要 mutate。
+    if (!node) {
+      out.push(node);
+      continue;
+    }
+    var rawRef = (typeof node['dialer-proxy'] === 'string')
+      ? node['dialer-proxy']
+      : (typeof node['underlying-proxy'] === 'string' ? node['underlying-proxy'] : null);
+    if (rawRef == null) {
+      out.push(node);
+      continue;
+    }
+    var newRef = (rawRef in renameMap) ? renameMap[rawRef] : rawRef;
+    if (validNames[newRef]) {
+      if (newRef !== rawRef) {
+        node['dialer-proxy'] = newRef;
+        node['underlying-proxy'] = newRef;  // 关键：覆盖内部存储字段
+        rewroteCount++;
+      }
+      out.push(node);
+      continue;
+    }
+    droppedCount++;
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[shadowrocket-injector] 丢弃 ' + node.name + '：dialer-proxy "' + rawRef + '" 找不到对应节点');
+    }
+  }
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[shadowrocket-injector] Pass2 done: rewrote=' + rewroteCount + ' dropped=' + droppedCount + ' kept=' + out.length);
+  }
+  return out;
 }
 
 function buildVpsFrontierNode() {
@@ -245,6 +300,17 @@ function buildVpsFrontierNode() {
 }
 
 function operator(proxies, targetPlatform, context) {
+  if (typeof console !== 'undefined' && console.log) {
+    var dialerCount = 0;
+    var underlyingCount = 0;
+    if (Array.isArray(proxies)) {
+      for (var i = 0; i < proxies.length; i++) {
+        if (proxies[i] && typeof proxies[i]['dialer-proxy'] === 'string') dialerCount++;
+        if (proxies[i] && typeof proxies[i]['underlying-proxy'] === 'string') underlyingCount++;
+      }
+    }
+    console.log('[shadowrocket-injector] operator entry: target=' + targetPlatform + ' input_count=' + (Array.isArray(proxies) ? proxies.length : 'N/A') + ' input_dialer=' + dialerCount + ' input_underlying=' + underlyingCount);
+  }
   const normalizedProxies = normalizeAirportProxies(proxies);
   const node = buildVpsFrontierNode();
   if (node) {
@@ -252,6 +318,18 @@ function operator(proxies, targetPlatform, context) {
       return p && p.name === node.name;
     });
     if (!exists) normalizedProxies.push(node);
+  }
+  if (typeof console !== 'undefined' && console.log) {
+    var outDialer = 0;
+    var outOldRefs = 0;
+    for (var j = 0; j < normalizedProxies.length; j++) {
+      var p = normalizedProxies[j];
+      if (p && typeof p['dialer-proxy'] === 'string') {
+        outDialer++;
+        if (p['dialer-proxy'].indexOf('广东-') !== -1) outOldRefs++;
+      }
+    }
+    console.log('[shadowrocket-injector] operator return: count=' + normalizedProxies.length + ' dialer_count=' + outDialer + ' OLD_refs_remaining=' + outOldRefs);
   }
   return normalizedProxies;
 }
