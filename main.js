@@ -654,8 +654,10 @@ function main(config) {
   // ================================================
   {
     const residentialNodeName = "🏠 [VPS→家宽] Frontier";
-    const residentialGroupName = "🏠 家宽-Frontier";
-    const paypalGroupName = "💵 PayPal";
+    // 注：以下两个组挂了大图标（icon 字段），组名故意不带 emoji 前缀
+    // 详见 .trellis/spec/network/proxy-group-flexibility.md §5 图标 + 命名规则
+    const residentialGroupName = "家宽-Frontier";
+    const paypalGroupName = "PayPal";
 
     // Koolson/Qure 图标库 base（与 powerfullz 国家组同款，Sparkle UI 显示协调）
     const ICON_BASE = "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color";
