@@ -873,6 +873,12 @@ function main(config) {
     //    这里把全部 select 类型的非工具组遍历一遍，末尾追加 5 个非空家宽组——让用户在任何
     //    业务组下拉里都能切到家宽（例：Netflix 默认走 powerfullz 国家组，偶尔风控想切 🏡 美国家宽）。
     //    push 到末尾不改 default，原 powerfullz 选首项的默认行为保留。
+    //
+    //    ⚠️ 同时追加 3 个具体家宽节点（spec §6.9 持久锁定）：
+    //    🏡 *家宽 组是 url-test 类型，按 interval=300 周期性测速；用户在 UI 里手动锁定的
+    //    "具体家宽节点"会在下一轮测速后被自动覆盖。要让"用户手选具体节点"持久化，必须
+    //    把节点名直接列进业务组（select 类型）proxies——select 的手选会持久到 mihomo cache。
+    //    所以同一循环里再 push 3 个本地生成 / 上游 Sub-Store 注入的家宽节点。
     const TOOL_GROUPS_EXCLUDE = new Set([
       "GLOBAL",
       "选择代理", "手动选择", "自动选择", "故障转移",
@@ -889,16 +895,44 @@ function main(config) {
       Array.isArray(g.proxies)
     );
 
+    // 硬编码的家宽节点名（来源：buildVpsNode / buildResidentialNode + 上游 Sub-Store Collection
+    // Script Operator 注入；命名稳定可写死）
+    // - 🏠 [VPS→家宽] Frontier   ：本地 buildVpsNode + Sub-Store 注入（去重后存在）
+    // - 🏠 [机场→家宽] Frontier  ：本地 buildResidentialNode 链式注入（mihomo 独有产物）
+    // - 🏠 [机场→家宽] ScrapeGW  ：同上
+    // 防御：节点未实际生成（机场无候选 / VPS 凭据缺失）则跳过，避免 push 不存在节点导致 mihomo schema 错误
+    const RESIDENTIAL_NODES = [
+      "🏠 [VPS→家宽] Frontier",
+      "🏠 [机场→家宽] Frontier",
+      "🏠 [机场→家宽] ScrapeGW",
+    ];
+    const allProxyNamesSet = new Set(
+      (config.proxies || []).map(p => p && p.name).filter(Boolean)
+    );
+    const availableResidentialNodes = RESIDENTIAL_NODES.filter(n => allProxyNamesSet.has(n));
+    const skippedResidentialNodes = RESIDENTIAL_NODES.filter(n => !allProxyNamesSet.has(n));
+    if (skippedResidentialNodes.length > 0) {
+      logInfo(`业务组镜像跳过未生成的家宽节点：${skippedResidentialNodes.join(", ")}`);
+    }
+
     let mirroredCount = 0;
+    let mirroredNodeCount = 0;
     for (const g of businessGroups) {
+      // 5a) push 5 个非空家宽组（url-test 自动测速）
       for (const meta of REGION_RESIDENTIAL_GROUPS) {
         if (!residentialHitGroupNames.has(meta.name)) continue;  // 跳过 hit 预检失败的（4 个空组）
         if (g.proxies.includes(meta.name)) continue;
         g.proxies.push(meta.name);
         mirroredCount++;
       }
+      // 5b) push 3 个具体家宽节点（select 选中后持久锁定，不被 url-test 周期覆盖）
+      for (const nodeName of availableResidentialNodes) {
+        if (g.proxies.includes(nodeName)) continue;
+        g.proxies.push(nodeName);
+        mirroredNodeCount++;
+      }
     }
-    logInfo(`业务组镜像家宽组完成：${businessGroups.length} 组追加，共 ${mirroredCount} 处插入`);
+    logInfo(`业务组镜像家宽组完成：${businessGroups.length} 组追加，共 ${mirroredCount} 处组插入 + ${mirroredNodeCount} 处节点插入`);
   }
 
   // ================================================
