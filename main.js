@@ -725,6 +725,13 @@ function main(config) {
     //     插入位置：紧贴 powerfullz 国家组之后、家宽-Frontier 之前
     //     用 splice 一次性插一段，定位锚点 = 第一个 powerfullz 工具组（"AI服务" / "前置代理" / "落地节点" / "选择代理" 之一）
     //     找不到锚点就追加到末尾
+    //
+    //     ⚠️ hit 预检（spec §6.x 空 url-test 组陷阱）：
+    //     mihomo schema 强制要求每个 proxy-group 的 proxies/use 至少有 1 个；include-all+filter
+    //     在编译阶段如果命中数 = 0，组就会变成 `proxies: []` → mihomo profile-check 报
+    //     `proxy group[..]: 'use' or 'proxies' missing` 让 FlClash / Sparkle 拒绝订阅。
+    //     所以这里循环前先用合成 filter 跑一次预检，**没命中的组直接跳过 upsert + 跳过 GLOBAL.proxies 注入**。
+    //     参考同款模式：buildFrontProxyGroups（行 161-167）的前置组预检。
     const residentialAnchorIdx = (() => {
       const candidates = ["AI服务", "前置代理", "落地节点", "选择代理"];
       for (const name of candidates) {
@@ -733,12 +740,35 @@ function main(config) {
       }
       return pgList.length;
     })();
+    const residentialExcludeRe = new RegExp(EXCLUDE_INFO_PATTERN);
+    const residentialHitGroupNames = new Set();
     let residentialInsertCursor = residentialAnchorIdx;
     for (const meta of REGION_RESIDENTIAL_GROUPS) {
-      if (pgList.some(g => g && g.name === meta.name)) continue;
+      if (pgList.some(g => g && g.name === meta.name)) {
+        // 既存同名组：保留并视为已 hit（可能由用户手动维护或上游注入）
+        residentialHitGroupNames.add(meta.name);
+        continue;
+      }
       const filter = meta.regionPattern == null
         ? RESIDENTIAL_PATTERN  // 全球家宽：仅匹配家宽关键词
         : `(${meta.regionPattern}).*(${RESIDENTIAL_PATTERN})|(${RESIDENTIAL_PATTERN}).*(${meta.regionPattern})`;
+
+      // 预检：合成 filter 跑一次，统计当前订阅命中数；命中 = 0 直接跳过（避免空 url-test 组让 mihomo 启动失败）
+      let filterRe;
+      try {
+        filterRe = new RegExp(filter);
+      } catch (e) {
+        logWarn(`${meta.name} filter 编译失败：${e && e.message}，跳过`);
+        continue;
+      }
+      const hit = (config.proxies || []).some(p =>
+        p && typeof p.name === "string" && filterRe.test(p.name) && !residentialExcludeRe.test(p.name)
+      );
+      if (!hit) {
+        logInfo(`跳过 ${meta.name}：当前订阅无候选节点（避免空 url-test 组让 mihomo 启动失败）`);
+        continue;
+      }
+
       pgList.splice(residentialInsertCursor, 0, {
         name: meta.name,
         type: "url-test",
@@ -752,6 +782,7 @@ function main(config) {
         icon: meta.icon,
       });
       residentialInsertCursor += 1;
+      residentialHitGroupNames.add(meta.name);
     }
 
     // 1b) upsert 通用家宽路由器（reusable，未来其他要走家宽的规则也能复用）
@@ -774,7 +805,10 @@ function main(config) {
       const insertAt = aiIdx >= 0 ? aiIdx + 1 : pgList.length;
       // PayPal 主走美国家宽（与 spec §6 默认锁定语义一致）：
       // 顺序 = [家宽-Frontier, VPS→家宽 Frontier, 🏡 美国家宽] + AI服务 完整面板
-      const paypalHead = [residentialGroupName, residentialNodeName, "🏡 美国家宽"];
+      // 若 🏡 美国家宽 因 hit 预检被跳过（订阅无 US 家宽候选），PayPal 兜底不引用
+      const paypalHead = residentialHitGroupNames.has("🏡 美国家宽")
+        ? [residentialGroupName, residentialNodeName, "🏡 美国家宽"]
+        : [residentialGroupName, residentialNodeName];
       pgList.splice(insertAt, 0, {
         name: paypalGroupName,
         type: "select",
@@ -799,7 +833,9 @@ function main(config) {
         insertGlobalAt += 1;
       }
       // 9 区域家宽组紧贴 PayPal 之后注入 GLOBAL.proxies（spec §4a：UI 显示必需）
+      // 仅注入实际存在的组（被 hit 预检跳过的组不要塞进 GLOBAL.proxies，否则 mihomo 报 unknown proxy name）
       for (const meta of REGION_RESIDENTIAL_GROUPS) {
+        if (!residentialHitGroupNames.has(meta.name)) continue;
         if (globalGroup.proxies.includes(meta.name)) continue;
         globalGroup.proxies.splice(insertGlobalAt, 0, meta.name);
         insertGlobalAt += 1;
