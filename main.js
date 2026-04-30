@@ -654,9 +654,8 @@ function main(config) {
   // ================================================
   {
     const residentialNodeName = "🏠 [VPS→家宽] Frontier";
-    // 注：以下两个组挂了大图标（icon 字段），组名故意不带 emoji 前缀
+    // 注：组挂了大图标（icon 字段），组名故意不带 emoji 前缀
     // 详见 .trellis/spec/network/proxy-group-flexibility.md §5 图标 + 命名规则
-    const residentialGroupName = "家宽-Frontier";
     const paypalGroupName = "PayPal";
 
     // Koolson/Qure 图标库 base（与 powerfullz 国家组同款，Sparkle UI 显示协调）
@@ -722,7 +721,7 @@ function main(config) {
     const pgList = Array.isArray(config["proxy-groups"]) ? config["proxy-groups"] : [];
 
     // 1a) upsert 9 个区域家宽 url-test 组（spec §6 区域家宽矩阵）
-    //     插入位置：紧贴 powerfullz 国家组之后、家宽-Frontier 之前
+    //     插入位置：紧贴 powerfullz 国家组之后、业务组之前
     //     用 splice 一次性插一段，定位锚点 = 第一个 powerfullz 工具组（"AI服务" / "前置代理" / "落地节点" / "选择代理" 之一）
     //     找不到锚点就追加到末尾
     //
@@ -785,16 +784,6 @@ function main(config) {
       residentialHitGroupNames.add(meta.name);
     }
 
-    // 1b) upsert 通用家宽路由器（reusable，未来其他要走家宽的规则也能复用）
-    if (!pgList.some(g => g && g.name === residentialGroupName)) {
-      pgList.push({
-        name: residentialGroupName,
-        type: "select",
-        proxies: [residentialNodeName, "DIRECT"],
-        icon: `${ICON_BASE}/Airport.png`,  // 与 powerfullz "落地节点" 同款
-      });
-    }
-
     // 2) upsert PayPal 专属选择组（UI 可切：家宽优先，附带 AI 服务整套国家/低倍率/手动选项）
     //    复用 powerfullz 生成的 "AI服务" 组的 proxies，未来 powerfullz 加新国家时 PayPal 自动跟随
     //    位置：插入到 AI服务 之后，与同类业务组（苹果服务/谷歌服务/...）聚集，UI 显示连贯
@@ -804,11 +793,11 @@ function main(config) {
       const aiIdx = pgList.findIndex(g => g && g.name === "AI服务");
       const insertAt = aiIdx >= 0 ? aiIdx + 1 : pgList.length;
       // PayPal 主走美国家宽（与 spec §6 默认锁定语义一致）：
-      // 顺序 = [家宽-Frontier, VPS→家宽 Frontier, 🏡 美国家宽] + AI服务 完整面板
+      // 顺序 = [VPS→家宽 Frontier 直接节点, 🏡 美国家宽 url-test 自动测速] + AI服务 完整面板
       // 若 🏡 美国家宽 因 hit 预检被跳过（订阅无 US 家宽候选），PayPal 兜底不引用
       const paypalHead = residentialHitGroupNames.has("🏡 美国家宽")
-        ? [residentialGroupName, residentialNodeName, "🏡 美国家宽"]
-        : [residentialGroupName, residentialNodeName];
+        ? [residentialNodeName, "🏡 美国家宽"]
+        : [residentialNodeName];
       pgList.splice(insertAt, 0, {
         name: paypalGroupName,
         type: "select",
@@ -839,10 +828,6 @@ function main(config) {
         if (globalGroup.proxies.includes(meta.name)) continue;
         globalGroup.proxies.splice(insertGlobalAt, 0, meta.name);
         insertGlobalAt += 1;
-      }
-      if (!globalGroup.proxies.includes(residentialGroupName)) {
-        // 家宽-Frontier 是工具组件，放 GLOBAL.proxies 末尾即可
-        globalGroup.proxies.push(residentialGroupName);
       }
     }
 
@@ -881,6 +866,39 @@ function main(config) {
       const insertedUserRules = prependUniqueRules(config, userRules);
       logInfo(`用户自定义规则注入：${insertedUserRules.length} 条 → ${paypalGroupName}/DIRECT`);
     }
+
+    // 5) 业务组镜像家宽组（spec §6.9）
+    //    powerfullz 自动生成的业务组（AI服务/苹果服务/谷歌服务/Netflix/...）proxies 默认只含
+    //    18 国 + 选择代理 + 低倍率 + 手动选择 + 直连共 21 项，**不含**我们的 🏡 *家宽 组。
+    //    这里把全部 select 类型的非工具组遍历一遍，末尾追加 5 个非空家宽组——让用户在任何
+    //    业务组下拉里都能切到家宽（例：Netflix 默认走 powerfullz 国家组，偶尔风控想切 🏡 美国家宽）。
+    //    push 到末尾不改 default，原 powerfullz 选首项的默认行为保留。
+    const TOOL_GROUPS_EXCLUDE = new Set([
+      "GLOBAL",
+      "选择代理", "手动选择", "自动选择", "故障转移",
+      "落地节点", "低倍率节点", "静态资源", "前置代理",
+      "直连", "DIRECT", "REJECT",
+      "广告拦截",  // spec §3 例外：拦截语义不需切代理
+      paypalGroupName,  // 自己已在 paypalHead 引用 🏡 美国家宽，不重复
+    ]);
+
+    const businessGroups = pgList.filter(g =>
+      g && g.type === "select" &&
+      typeof g.name === "string" &&
+      !TOOL_GROUPS_EXCLUDE.has(g.name) &&
+      Array.isArray(g.proxies)
+    );
+
+    let mirroredCount = 0;
+    for (const g of businessGroups) {
+      for (const meta of REGION_RESIDENTIAL_GROUPS) {
+        if (!residentialHitGroupNames.has(meta.name)) continue;  // 跳过 hit 预检失败的（4 个空组）
+        if (g.proxies.includes(meta.name)) continue;
+        g.proxies.push(meta.name);
+        mirroredCount++;
+      }
+    }
+    logInfo(`业务组镜像家宽组完成：${businessGroups.length} 组追加，共 ${mirroredCount} 处插入`);
   }
 
   // ================================================
