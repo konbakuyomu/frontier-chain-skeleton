@@ -662,8 +662,99 @@ function main(config) {
     // Koolson/Qure 图标库 base（与 powerfullz 国家组同款，Sparkle UI 显示协调）
     const ICON_BASE = "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color";
 
-    // 1) upsert 通用家宽路由器（reusable，未来其他要走家宽的规则也能复用）
+    // ===== 区域家宽矩阵（spec §6）=====
+    // 来源：cherry-pick Smart-Config-Kit/Shadowrocket.conf 行 119-152 的 9 区域 url-test 定义
+    // 关键设计：filter 用 (区域).*(家宽)|(家宽).*(区域) 双向匹配，命中"美国-家宽-LA-1"或"Resi-Tokyo-01"两类命名
+    // 双端一致性：Shadowrocket.conf 必须同步等价 9 区域家宽组（见 spec §6 一致性表）
+    const RESIDENTIAL_PATTERN = "[Rr]esi(dential)?|[Hh]ome[-_ ]?[Ii][Pp]|[Hh]ome[-_ ]?[Bb]roadband|[Bb]roadband|[Ii][Ss][Pp]|家宽|家庭宽带|家庭住宅|住宅宽带|住宅|宽带";
+    const EXCLUDE_INFO_PATTERN = "导航|剩余|套餐|到期|重置|官网|订阅|回国|回程|国内专线";
+
+    // 每个区域 regionPattern 直接 cherry-pick Smart-Config-Kit policy-regex-filter 的国家段
+    // 顺序：从大到小（全球 → 大洲/区域聚合 → 单国），UI 排列上下文从宽到窄
+    const REGION_RESIDENTIAL_GROUPS = [
+      {
+        name: "🏡 全球家宽",
+        regionPattern: null,  // 全球家宽特殊：只匹配 RESIDENTIAL_PATTERN，不复合区域
+        icon: `${ICON_BASE}/World_Map.png`,
+      },
+      {
+        name: "🏡 香港家宽",
+        regionPattern: "🇭🇰|HK|Hong|hong|HongKong|hongkong|HKG|香港|深港|沪港|京港|中港|Hong Kong",
+        icon: `${ICON_BASE}/Hong_Kong.png`,
+      },
+      {
+        name: "🏡 台湾家宽",
+        regionPattern: "🇹🇼|TW|Taiwan|taiwan|TWN|Taipei|taipei|TPE|台湾|台灣|台北|台中|高雄|新北|桃园",
+        icon: `${ICON_BASE}/Taiwan.png`,
+      },
+      {
+        name: "🏡 日韩家宽",
+        regionPattern: "🇯🇵|🇰🇷|JP|Japan|japan|JPN|Tokyo|tokyo|Osaka|osaka|NRT|HND|KIX|日本|东京|大阪|横滨|名古屋|KR|Korea|korea|KOR|Seoul|seoul|ICN|韩国|首尔|釜山|仁川",
+        icon: `${ICON_BASE}/Japan.png`,
+      },
+      {
+        name: "🏡 亚太家宽",
+        regionPattern: "🇭🇰|🇹🇼|🇯🇵|🇰🇷|🇸🇬|🇲🇾|🇹🇭|🇻🇳|🇵🇭|🇮🇩|🇮🇳|HK|TW|JP|KR|SG|MY|TH|VN|PH|ID|IN|Hong|Taiwan|Japan|Korea|Singapore|Malaysia|Thailand|Vietnam|Philippines|Indonesia|India|香港|台湾|日本|韩国|新加坡|狮城|马来|泰国|越南|菲律宾|印尼|印度|亚太|iplc|IEPL|专线|cn2|GIA",
+        icon: `${ICON_BASE}/Asia_Map.png`,
+      },
+      {
+        name: "🏡 美国家宽",
+        regionPattern: "🇺🇸|(?<![a-zA-Z])US(?![a-zA-Z])|USA|America|america|United States|LAX|SJC|SFO|SEA|JFK|ORD|DFW|IAD|ATL|MIA|美国|洛杉矶|圣何塞|旧金山|西雅图|纽约|芝加哥|达拉斯|凤凰城|亚特兰大|迈阿密|波士顿|华盛顿|休斯顿|硅谷|弗吉尼亚|奥斯汀|拉斯维加斯",
+        icon: `${ICON_BASE}/United_States_Map.png`,
+      },
+      {
+        name: "🏡 欧洲家宽",
+        regionPattern: "🇬🇧|🇫🇷|🇩🇪|🇳🇱|🇨🇭|🇮🇹|🇪🇸|🇷🇺|EU|UK|GB|FR|DE|NL|CH|IT|ES|PT|(?<![a-zA-Z])SE(?![a-zA-Z])|FI|NO|DK|(?<![a-zA-Z])PL(?![a-zA-Z])|IE|RU|AT|BE|Europe|europe|London|Paris|Berlin|Frankfurt|Amsterdam|Moscow|Zurich|Vienna|Stockholm|Madrid|Rome|Helsinki|Warsaw|Prague|LHR|CDG|FRA|AMS|SVO|ZRH|VIE|MAD|FCO|欧洲|英国|法国|德国|荷兰|瑞士|意大利|西班牙|俄罗斯|奥地利|瑞典|芬兰|挪威|丹麦|波兰|爱尔兰|伦敦|巴黎|柏林|法兰克福|阿姆斯特丹|莫斯科|苏黎世|维也纳|斯德哥尔摩|马德里|罗马|(?<![a-zA-Z])GR(?![a-zA-Z])|🇬🇷|Greece|Athens|希腊|雅典|(?<![a-zA-Z])RO(?![a-zA-Z])|🇷🇴|Romania|Bucharest|罗马尼亚|布加勒斯特|(?<![a-zA-Z])HU(?![a-zA-Z])|🇭🇺|Hungary|Budapest|匈牙利|布达佩斯|(?<![a-zA-Z])CZ(?![a-zA-Z])|🇨🇿|Czech|Portugal|Lisbon|🇵🇹|葡萄牙|里斯本|Belgium|Brussels|🇧🇪|比利时|布鲁塞尔|Ireland|Dublin|🇮🇪|爱尔兰|都柏林|Denmark|Copenhagen|🇩🇰|丹麦|哥本哈根|Norway|Oslo|🇳🇴|挪威|奥斯陆",
+        icon: `${ICON_BASE}/Europe_Map.png`,
+      },
+      {
+        name: "🏡 美洲家宽",
+        regionPattern: "🇺🇸|🇨🇦|🇲🇽|🇧🇷|🇦🇷|🇨🇱|🇵🇪|🇨🇴|(?<![a-zA-Z])US(?![a-zA-Z])|USA|CA|MX|BR|AR|CL|PE|CO|Americas|America|Canada|Mexico|Brazil|Argentina|Chile|Peru|Colombia|Toronto|Vancouver|Montreal|YYZ|YVR|GRU|GIG|EZE|美洲|加拿大|墨西哥|巴西|阿根廷|智利|秘鲁|哥伦比亚|多伦多|温哥华|蒙特利尔|圣保罗",
+        icon: `${ICON_BASE}/America_Map.png`,
+      },
+      {
+        name: "🏡 非洲家宽",
+        regionPattern: "🇿🇦|🇪🇬|🇳🇬|🇰🇪|ZA|EG|NG|KE|MA|TN|DZ|Africa|africa|South Africa|Egypt|Nigeria|Kenya|Morocco|Johannesburg|Cairo|Lagos|Nairobi|JNB|CAI|NBO|非洲|南非|埃及|尼日利亚|肯尼亚|摩洛哥|约翰内斯堡|开罗|拉各斯|内罗毕",
+        icon: `${ICON_BASE}/Africa_Map.png`,
+      },
+    ];
+
     const pgList = Array.isArray(config["proxy-groups"]) ? config["proxy-groups"] : [];
+
+    // 1a) upsert 9 个区域家宽 url-test 组（spec §6 区域家宽矩阵）
+    //     插入位置：紧贴 powerfullz 国家组之后、家宽-Frontier 之前
+    //     用 splice 一次性插一段，定位锚点 = 第一个 powerfullz 工具组（"AI服务" / "前置代理" / "落地节点" / "选择代理" 之一）
+    //     找不到锚点就追加到末尾
+    const residentialAnchorIdx = (() => {
+      const candidates = ["AI服务", "前置代理", "落地节点", "选择代理"];
+      for (const name of candidates) {
+        const idx = pgList.findIndex(g => g && g.name === name);
+        if (idx >= 0) return idx;
+      }
+      return pgList.length;
+    })();
+    let residentialInsertCursor = residentialAnchorIdx;
+    for (const meta of REGION_RESIDENTIAL_GROUPS) {
+      if (pgList.some(g => g && g.name === meta.name)) continue;
+      const filter = meta.regionPattern == null
+        ? RESIDENTIAL_PATTERN  // 全球家宽：仅匹配家宽关键词
+        : `(${meta.regionPattern}).*(${RESIDENTIAL_PATTERN})|(${RESIDENTIAL_PATTERN}).*(${meta.regionPattern})`;
+      pgList.splice(residentialInsertCursor, 0, {
+        name: meta.name,
+        type: "url-test",
+        "include-all": true,
+        filter,
+        "exclude-filter": EXCLUDE_INFO_PATTERN,
+        url: "https://cp.cloudflare.com/generate_204",
+        interval: 300,
+        tolerance: 50,
+        lazy: true,
+        icon: meta.icon,
+      });
+      residentialInsertCursor += 1;
+    }
+
+    // 1b) upsert 通用家宽路由器（reusable，未来其他要走家宽的规则也能复用）
     if (!pgList.some(g => g && g.name === residentialGroupName)) {
       pgList.push({
         name: residentialGroupName,
@@ -681,12 +772,15 @@ function main(config) {
     if (!pgList.some(g => g && g.name === paypalGroupName)) {
       const aiIdx = pgList.findIndex(g => g && g.name === "AI服务");
       const insertAt = aiIdx >= 0 ? aiIdx + 1 : pgList.length;
+      // PayPal 主走美国家宽（与 spec §6 默认锁定语义一致）：
+      // 顺序 = [家宽-Frontier, VPS→家宽 Frontier, 🏡 美国家宽] + AI服务 完整面板
+      const paypalHead = [residentialGroupName, residentialNodeName, "🏡 美国家宽"];
       pgList.splice(insertAt, 0, {
         name: paypalGroupName,
         type: "select",
         proxies: aiProxiesClone.length > 0
-          ? [residentialGroupName, residentialNodeName, ...aiProxiesClone]
-          : [residentialGroupName, residentialNodeName, selectGroup, "DIRECT"],
+          ? [...paypalHead, ...aiProxiesClone]
+          : [...paypalHead, selectGroup, "DIRECT"],
         icon: `${ICON_BASE}/PayPal.png`,
       });
     }
@@ -699,9 +793,16 @@ function main(config) {
     const globalGroup = pgList.find(g => g && g.name === "GLOBAL");
     if (globalGroup && Array.isArray(globalGroup.proxies)) {
       const aiIdxInGlobal = globalGroup.proxies.indexOf("AI服务");
-      const insertGlobalAt = aiIdxInGlobal >= 0 ? aiIdxInGlobal + 1 : globalGroup.proxies.length;
+      let insertGlobalAt = aiIdxInGlobal >= 0 ? aiIdxInGlobal + 1 : globalGroup.proxies.length;
       if (!globalGroup.proxies.includes(paypalGroupName)) {
         globalGroup.proxies.splice(insertGlobalAt, 0, paypalGroupName);
+        insertGlobalAt += 1;
+      }
+      // 9 区域家宽组紧贴 PayPal 之后注入 GLOBAL.proxies（spec §4a：UI 显示必需）
+      for (const meta of REGION_RESIDENTIAL_GROUPS) {
+        if (globalGroup.proxies.includes(meta.name)) continue;
+        globalGroup.proxies.splice(insertGlobalAt, 0, meta.name);
+        insertGlobalAt += 1;
       }
       if (!globalGroup.proxies.includes(residentialGroupName)) {
         // 家宽-Frontier 是工具组件，放 GLOBAL.proxies 末尾即可
