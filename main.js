@@ -678,22 +678,22 @@ function main(config) {
       },
       {
         name: "🏡 香港家宽",
-        regionPattern: "🇭🇰|HK|Hong|hong|HongKong|hongkong|HKG|香港|深港|沪港|京港|中港|Hong Kong",
+        regionPattern: "🇭🇰|(?<![a-zA-Z])HK(?![a-zA-Z])|Hong|hong|HongKong|hongkong|HKG|香港|深港|沪港|京港|中港|Hong Kong",
         icon: `${ICON_BASE}/Hong_Kong.png`,
       },
       {
         name: "🏡 台湾家宽",
-        regionPattern: "🇹🇼|TW|Taiwan|taiwan|TWN|Taipei|taipei|TPE|台湾|台灣|台北|台中|高雄|新北|桃园",
+        regionPattern: "🇹🇼|(?<![a-zA-Z])TW(?![a-zA-Z])|Taiwan|taiwan|TWN|Taipei|taipei|TPE|台湾|台灣|台北|台中|高雄|新北|桃园",
         icon: `${ICON_BASE}/Taiwan.png`,
       },
       {
         name: "🏡 日韩家宽",
-        regionPattern: "🇯🇵|🇰🇷|JP|Japan|japan|JPN|Tokyo|tokyo|Osaka|osaka|NRT|HND|KIX|日本|东京|大阪|横滨|名古屋|KR|Korea|korea|KOR|Seoul|seoul|ICN|韩国|首尔|釜山|仁川",
+        regionPattern: "🇯🇵|🇰🇷|(?<![a-zA-Z])JP(?![a-zA-Z])|Japan|japan|JPN|Tokyo|tokyo|Osaka|osaka|NRT|HND|KIX|日本|东京|大阪|横滨|名古屋|(?<![a-zA-Z])KR(?![a-zA-Z])|Korea|korea|KOR|Seoul|seoul|ICN|韩国|首尔|釜山|仁川",
         icon: `${ICON_BASE}/Japan.png`,
       },
       {
         name: "🏡 亚太家宽",
-        regionPattern: "🇭🇰|🇹🇼|🇯🇵|🇰🇷|🇸🇬|🇲🇾|🇹🇭|🇻🇳|🇵🇭|🇮🇩|🇮🇳|HK|TW|JP|KR|SG|MY|TH|VN|PH|ID|IN|Hong|Taiwan|Japan|Korea|Singapore|Malaysia|Thailand|Vietnam|Philippines|Indonesia|India|香港|台湾|日本|韩国|新加坡|狮城|马来|泰国|越南|菲律宾|印尼|印度|亚太|iplc|IEPL|专线|cn2|GIA",
+        regionPattern: "🇭🇰|🇹🇼|🇯🇵|🇰🇷|🇸🇬|🇲🇾|🇹🇭|🇻🇳|🇵🇭|🇮🇩|🇮🇳|(?<![a-zA-Z])HK(?![a-zA-Z])|(?<![a-zA-Z])TW(?![a-zA-Z])|(?<![a-zA-Z])JP(?![a-zA-Z])|(?<![a-zA-Z])KR(?![a-zA-Z])|(?<![a-zA-Z])SG(?![a-zA-Z])|(?<![a-zA-Z])MY(?![a-zA-Z])|(?<![a-zA-Z])TH(?![a-zA-Z])|(?<![a-zA-Z])VN(?![a-zA-Z])|(?<![a-zA-Z])PH(?![a-zA-Z])|(?<![a-zA-Z])ID(?![a-zA-Z])|(?<![a-zA-Z])IN(?![a-zA-Z])|Hong|Taiwan|Japan|Korea|Singapore|Malaysia|Thailand|Vietnam|Philippines|Indonesia|India|香港|台湾|日本|韩国|新加坡|狮城|马来|泰国|越南|菲律宾|印尼|印度|亚太|iplc|IEPL|专线|cn2|GIA",
         icon: `${ICON_BASE}/Asia_Map.png`,
       },
       {
@@ -703,17 +703,17 @@ function main(config) {
       },
       {
         name: "🏡 欧洲家宽",
-        regionPattern: "🇬🇧|🇫🇷|🇩🇪|🇳🇱|🇨🇭|🇮🇹|🇪🇸|🇷🇺|EU|UK|GB|FR|DE|NL|CH|IT|ES|PT|(?<![a-zA-Z])SE(?![a-zA-Z])|FI|NO|DK|(?<![a-zA-Z])PL(?![a-zA-Z])|IE|RU|AT|BE|Europe|europe|London|Paris|Berlin|Frankfurt|Amsterdam|Moscow|Zurich|Vienna|Stockholm|Madrid|Rome|Helsinki|Warsaw|Prague|LHR|CDG|FRA|AMS|SVO|ZRH|VIE|MAD|FCO|欧洲|英国|法国|德国|荷兰|瑞士|意大利|西班牙|俄罗斯|奥地利|瑞典|芬兰|挪威|丹麦|波兰|爱尔兰|伦敦|巴黎|柏林|法兰克福|阿姆斯特丹|莫斯科|苏黎世|维也纳|斯德哥尔摩|马德里|罗马|(?<![a-zA-Z])GR(?![a-zA-Z])|🇬🇷|Greece|Athens|希腊|雅典|(?<![a-zA-Z])RO(?![a-zA-Z])|🇷🇴|Romania|Bucharest|罗马尼亚|布加勒斯特|(?<![a-zA-Z])HU(?![a-zA-Z])|🇭🇺|Hungary|Budapest|匈牙利|布达佩斯|(?<![a-zA-Z])CZ(?![a-zA-Z])|🇨🇿|Czech|Portugal|Lisbon|🇵🇹|葡萄牙|里斯本|Belgium|Brussels|🇧🇪|比利时|布鲁塞尔|Ireland|Dublin|🇮🇪|爱尔兰|都柏林|Denmark|Copenhagen|🇩🇰|丹麦|哥本哈根|Norway|Oslo|🇳🇴|挪威|奥斯陆",
+        regionPattern: "🇬🇧|🇫🇷|🇩🇪|🇳🇱|🇨🇭|🇮🇹|🇪🇸|🇷🇺|(?<![a-zA-Z])EU(?![a-zA-Z])|(?<![a-zA-Z])UK(?![a-zA-Z])|(?<![a-zA-Z])GB(?![a-zA-Z])|(?<![a-zA-Z])FR(?![a-zA-Z])|(?<![a-zA-Z])DE(?![a-zA-Z])|(?<![a-zA-Z])NL(?![a-zA-Z])|(?<![a-zA-Z])CH(?![a-zA-Z])|(?<![a-zA-Z])IT(?![a-zA-Z])|(?<![a-zA-Z])ES(?![a-zA-Z])|(?<![a-zA-Z])PT(?![a-zA-Z])|(?<![a-zA-Z])SE(?![a-zA-Z])|(?<![a-zA-Z])FI(?![a-zA-Z])|(?<![a-zA-Z])NO(?![a-zA-Z])|(?<![a-zA-Z])DK(?![a-zA-Z])|(?<![a-zA-Z])PL(?![a-zA-Z])|(?<![a-zA-Z])IE(?![a-zA-Z])|(?<![a-zA-Z])RU(?![a-zA-Z])|(?<![a-zA-Z])AT(?![a-zA-Z])|(?<![a-zA-Z])BE(?![a-zA-Z])|Europe|europe|London|Paris|Berlin|Frankfurt|Amsterdam|Moscow|Zurich|Vienna|Stockholm|Madrid|Rome|Helsinki|Warsaw|Prague|LHR|CDG|FRA|AMS|SVO|ZRH|VIE|MAD|FCO|欧洲|英国|法国|德国|荷兰|瑞士|意大利|西班牙|俄罗斯|奥地利|瑞典|芬兰|挪威|丹麦|波兰|爱尔兰|伦敦|巴黎|柏林|法兰克福|阿姆斯特丹|莫斯科|苏黎世|维也纳|斯德哥尔摩|马德里|罗马|(?<![a-zA-Z])GR(?![a-zA-Z])|🇬🇷|Greece|Athens|希腊|雅典|(?<![a-zA-Z])RO(?![a-zA-Z])|🇷🇴|Romania|Bucharest|罗马尼亚|布加勒斯特|(?<![a-zA-Z])HU(?![a-zA-Z])|🇭🇺|Hungary|Budapest|匈牙利|布达佩斯|(?<![a-zA-Z])CZ(?![a-zA-Z])|🇨🇿|Czech|Portugal|Lisbon|🇵🇹|葡萄牙|里斯本|Belgium|Brussels|🇧🇪|比利时|布鲁塞尔|Ireland|Dublin|🇮🇪|爱尔兰|都柏林|Denmark|Copenhagen|🇩🇰|丹麦|哥本哈根|Norway|Oslo|🇳🇴|挪威|奥斯陆",
         icon: `${ICON_BASE}/Europe_Map.png`,
       },
       {
         name: "🏡 美洲家宽",
-        regionPattern: "🇺🇸|🇨🇦|🇲🇽|🇧🇷|🇦🇷|🇨🇱|🇵🇪|🇨🇴|(?<![a-zA-Z])US(?![a-zA-Z])|USA|CA|MX|BR|AR|CL|PE|CO|Americas|America|Canada|Mexico|Brazil|Argentina|Chile|Peru|Colombia|Toronto|Vancouver|Montreal|YYZ|YVR|GRU|GIG|EZE|美洲|加拿大|墨西哥|巴西|阿根廷|智利|秘鲁|哥伦比亚|多伦多|温哥华|蒙特利尔|圣保罗",
+        regionPattern: "🇺🇸|🇨🇦|🇲🇽|🇧🇷|🇦🇷|🇨🇱|🇵🇪|🇨🇴|(?<![a-zA-Z])US(?![a-zA-Z])|USA|(?<![a-zA-Z])CA(?![a-zA-Z])|(?<![a-zA-Z])MX(?![a-zA-Z])|(?<![a-zA-Z])BR(?![a-zA-Z])|(?<![a-zA-Z])AR(?![a-zA-Z])|(?<![a-zA-Z])CL(?![a-zA-Z])|(?<![a-zA-Z])PE(?![a-zA-Z])|(?<![a-zA-Z])CO(?![a-zA-Z])|Americas|America|Canada|Mexico|Brazil|Argentina|Chile|Peru|Colombia|Toronto|Vancouver|Montreal|YYZ|YVR|GRU|GIG|EZE|美洲|加拿大|墨西哥|巴西|阿根廷|智利|秘鲁|哥伦比亚|多伦多|温哥华|蒙特利尔|圣保罗",
         icon: `${ICON_BASE}/America_Map.png`,
       },
       {
         name: "🏡 非洲家宽",
-        regionPattern: "🇿🇦|🇪🇬|🇳🇬|🇰🇪|ZA|EG|NG|KE|MA|TN|DZ|Africa|africa|South Africa|Egypt|Nigeria|Kenya|Morocco|Johannesburg|Cairo|Lagos|Nairobi|JNB|CAI|NBO|非洲|南非|埃及|尼日利亚|肯尼亚|摩洛哥|约翰内斯堡|开罗|拉各斯|内罗毕",
+        regionPattern: "🇿🇦|🇪🇬|🇳🇬|🇰🇪|(?<![a-zA-Z])ZA(?![a-zA-Z])|(?<![a-zA-Z])EG(?![a-zA-Z])|(?<![a-zA-Z])NG(?![a-zA-Z])|(?<![a-zA-Z])KE(?![a-zA-Z])|(?<![a-zA-Z])MA(?![a-zA-Z])|(?<![a-zA-Z])TN(?![a-zA-Z])|(?<![a-zA-Z])DZ(?![a-zA-Z])|Africa|africa|South Africa|Egypt|Nigeria|Kenya|Morocco|Johannesburg|Cairo|Lagos|Nairobi|JNB|CAI|NBO|非洲|南非|埃及|尼日利亚|肯尼亚|摩洛哥|约翰内斯堡|开罗|拉各斯|内罗毕",
         icon: `${ICON_BASE}/Africa_Map.png`,
       },
     ];
@@ -836,13 +836,13 @@ function main(config) {
     const userProviders = {
       "paypal-meta": {
         type: "http", behavior: "domain", format: "mrs",
-        url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/paypal.mrs",
+        url: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/paypal.mrs",
         path: "./ruleset/paypal-meta.mrs", interval: 86400,
         proxy: selectGroup,
       },
       "paypal-cn-meta": {
         type: "http", behavior: "domain", format: "mrs",
-        url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/paypal%40cn.mrs",
+        url: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/paypal%40cn.mrs",
         path: "./ruleset/paypal-cn-meta.mrs", interval: 86400,
         proxy: selectGroup,
       },
@@ -885,7 +885,8 @@ function main(config) {
       "落地节点", "低倍率节点", "静态资源", "前置代理",
       "直连", "DIRECT", "REJECT",
       "广告拦截",  // spec §3 例外：拦截语义不需切代理
-      paypalGroupName,  // 自己已在 paypalHead 引用 🏡 美国家宽，不重复
+      // PayPal 不再排除：业务组镜像循环统一注入 5 家宽组 + 3 家宽节点
+      // includes 检查保护去重（PayPal 头部已含 🏠 [VPS→家宽] Frontier / 🏡 美国家宽 → 跳过）
     ]);
 
     const businessGroups = pgList.filter(g =>
