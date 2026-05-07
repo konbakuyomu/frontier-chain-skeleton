@@ -126,5 +126,9 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'remote verification failed' }
   Write-Ok 'remote verification passed'
 } finally {
-  & ssh @sshArgs ("rm -rf " + (Quote-Remote $remoteStage)) | Out-Null
+  $cleanupCmd = @(
+    'rm -f ' + (Quote-Remote "$remoteStage/remote-verify-substore.py"),
+    'rmdir ' + (Quote-Remote $remoteStage) + ' 2>/dev/null || true'
+  ) -join ' && '
+  & ssh @sshArgs $cleanupCmd | Out-Null
 }

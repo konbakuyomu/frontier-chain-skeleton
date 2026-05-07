@@ -1,29 +1,55 @@
 /*!
- * frontier-chain-skeleton — Shadowrocket 节点订阅脚本
+ * frontier-chain-skeleton — Sub-Store 节点清洗脚本
  *
- * 通过 Sub-Store ShadowRocket producer + 此 Script Operator 归一化节点名并注入家宽链路节点
+ * 通过 Sub-Store producer + 此 Script Operator 过滤伪节点并归一化节点名
  * 入口签名: function operator(proxies, targetPlatform, context)  (Sub-Store 节点处理)
  *
- * 凭据通过 Sub-Store Script Operator arguments 注入 ($arguments):
- *   {"vps_server":"<host>","vps_password":"<pass>","vps_port":"<port>","vps_cipher":"<cipher>"}
- *
- * 自建节点 name 固定为 "🏠 [VPS→家宽] Frontier"，与 shadowrocket.conf 的
- *   policy-regex-filter=\[VPS→家宽\]
- * 配合，让 [Proxy Group] 自动捕获，避免任何手维护节点列表。
+ * 可选 arguments:
+ *   source_prefix_map: {"subscription-name":"PREFIX"}
+ *   timeout_residential_names: ["exact node name", ...]
  *
  * 安全约束:
- *   - 不写默认凭据、不硬编码 server/password
- *   - 凭据缺失时静默跳过 (不抛异常, 不阻塞订阅)
- *   - 不引入 ScrapeGW 链路 (iPhone 端只保留 [VPS→家宽] 一条)
+ *   - 不写默认凭据、不硬编码供应商订阅 URL
+ *   - 不注入任何自建家宽链路节点
+ *   - 家宽供应只来自 Sub-Store 上游订阅池
  */
 
-const FRONTIER_NODE_NAME = '🏠 [VPS→家宽] Frontier';
-const INFO_PSEUDO_NODE_NAME_PATTERN = /(剩余流量|距离下次重置|套餐到期)/;
+const INFO_PSEUDO_NODE_NAME_PATTERN = /(导航|剩余|套餐|到期|重置|官网|订阅|回国|回程|国内专线|地址|保底|客服|流量|距离下次|不可直连|小白不要连接)/i;
+const NON_DIRECT_PROXY_PATTERN = /(不可直连|小白不要连接)/i;
+const RETIRED_PROVIDER_PATTERN = /(Frontier|ScrapeGW|\[VPS[→-]>?家宽\]|\[机场[→-]>?家宽\])/i;
+const RESIDENTIAL_PATTERN = /[Rr]esi(dential)?|[Hh]ome[-_ ]?[Ii][Pp]|[Hh]ome[-_ ]?[Bb]roadband|[Bb]roadband|[Ii][Ss][Pp]|家宽|家庭宽带|家庭住宅|住宅宽带|住宅|宽带/;
+const DEFAULT_TIMEOUT_RESIDENTIAL_NAMES = [
+  'cf加速|越南动态家宽🇻🇳',
+  '越南-cf加速 动态 🇻🇳-家宽',
+  'cf加速|美国备用家宽一🇺🇸',
+  '美国-cf加速 备用 一🇺🇸-家宽',
+  'cf加速|美国备用动态家宽三🇺🇸',
+  '美国-cf加速 备用动态 三🇺🇸-家宽',
+  '【5x】中转|美国备用家宽🇺🇸',
+  '美国-【5x】中转 备用 🇺🇸-家宽',
+  '【5x】中转|加拿大家宽🇨🇦',
+  '加拿大-【5x】中转-家宽',
+  '【5x】中转|韩国KT家宽',
+  '韩国-【5x】中转 KT-家宽',
+  '美国-密西西比州Comcast家宽-001',
+  '【备用-2】美国AT&T备用家宽vless🇺🇸',
+  '美国-【备用-2】 AT&T备用 🇺🇸-家宽',
+  '新英国家宽🇬🇧vless',
+  '英国-新英-家宽',
+  '专线|尼日利亚家宽🇳🇬',
+  '尼日利亚-专线-家宽',
+  '尼日利亚家宽🇳🇬hy2',
+  '尼日利亚-🇳🇬hy2-家宽',
+];
 const FLAG_PREFIX_PATTERN = /^(?:\uD83C[\uDDE6-\uDDFF]){2}\s*/;
 const DEFAULT_SOURCE_PREFIX_MAP = {
   ccrui: 'CCR',
   ccr: 'CCR',
   kuma: 'KUMA',
+  agg: 'AGG',
+  aggregated: 'AGG',
+  'aggregated-residential': 'AGG',
+  residential: 'AGG',
 };
 const SOURCE_PREFIX_FIELDS = [
   '__sourcePrefix',
@@ -216,6 +242,30 @@ function getCred(key) {
   return undefined;
 }
 
+function parseListArg(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(function (item) { return String(item).trim(); }).filter(Boolean);
+  if (typeof value === 'string') {
+    try {
+      var parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parseListArg(parsed);
+    } catch (e) {
+      /* fallback to newline/comma split */
+    }
+    return value.split(/\r?\n|,/).map(function (item) { return item.trim(); }).filter(Boolean);
+  }
+  return [];
+}
+
+function getTimeoutResidentialNameSet() {
+  var names = DEFAULT_TIMEOUT_RESIDENTIAL_NAMES.slice();
+  names = names.concat(parseListArg(getCred('timeout_residential_names')));
+  return names.reduce(function (set, name) {
+    set[name] = true;
+    return set;
+  }, {});
+}
+
 function stripLeadingFlag(name) {
   return String(name || '').replace(FLAG_PREFIX_PATTERN, '').trim();
 }
@@ -295,7 +345,7 @@ function normalizeSourcePrefixValue(value, map) {
   if (value == null) return '';
   var text = String(value).trim();
   if (!text) return '';
-  if (/^(CCR|KUMA)$/i.test(text)) return text.toUpperCase();
+  if (/^(CCR|KUMA|AGG)$/i.test(text)) return text.toUpperCase();
   var lower = text.toLowerCase();
   for (var key in map) {
     if (Object.prototype.hasOwnProperty.call(map, key) && lower.indexOf(key) !== -1) {
@@ -363,6 +413,10 @@ function splitProviderParts(provider) {
   return parts;
 }
 
+function hasResidentialTag(text) {
+  return RESIDENTIAL_PATTERN.test(String(text || ''));
+}
+
 function routeTagToPart(routeTag) {
   return String(routeTag || '').replace(/^\[/, '').replace(/\]$/, '').trim();
 }
@@ -381,7 +435,7 @@ function buildUnifiedName(sourcePrefix, regionName, provider, routeTag, rateLabe
 }
 
 function normalizeAirportNodeName(name, proxy) {
-  if (!name || name === FRONTIER_NODE_NAME || INFO_PSEUDO_NODE_NAME_PATTERN.test(name)) {
+  if (!name || INFO_PSEUDO_NODE_NAME_PATTERN.test(name)) {
     return name;
   }
 
@@ -389,10 +443,11 @@ function normalizeAirportNodeName(name, proxy) {
   const sourcePrefix = detectSourcePrefix(proxy);
   if (!region && !sourcePrefix) return name;
 
+  const originalIsResidential = hasResidentialTag(name);
   const provider = region ? extractProviderLabel(name, region) : cleanupProviderLabel(removeRouteTag(name));
   const routeTag = extractRouteTag(name);
   const rateLabel = extractRateLabel(name);
-  return buildUnifiedName(
+  var normalized = buildUnifiedName(
     sourcePrefix,
     region ? region.display : '其他',
     provider,
@@ -400,10 +455,33 @@ function normalizeAirportNodeName(name, proxy) {
     rateLabel,
     name
   );
+  if (originalIsResidential && !hasResidentialTag(normalized)) {
+    normalized = normalized + '-家宽';
+  }
+  return normalized;
 }
 
 function isInfoPseudoNode(proxy) {
   return Boolean(proxy && typeof proxy.name === 'string' && INFO_PSEUDO_NODE_NAME_PATTERN.test(proxy.name));
+}
+
+function isNonDirectProxy(proxy) {
+  return Boolean(proxy && typeof proxy.name === 'string' && NON_DIRECT_PROXY_PATTERN.test(proxy.name));
+}
+
+function isRetiredProviderProxy(proxy) {
+  return Boolean(proxy && typeof proxy.name === 'string' && RETIRED_PROVIDER_PATTERN.test(proxy.name));
+}
+
+function isTimeoutResidentialNode(proxy, timeoutNames) {
+  var name = proxy && typeof proxy.name === 'string' ? proxy.name : '';
+  var withoutSourcePrefix = name.replace(/^[A-Z0-9]{2,8}\s*\|\s*/, '');
+  return Boolean(
+    proxy &&
+    typeof proxy.name === 'string' &&
+    hasResidentialTag(proxy.name) &&
+    (timeoutNames[name] || timeoutNames[withoutSourcePrefix])
+  );
 }
 
 function normalizeAirportProxies(proxies) {
@@ -412,7 +490,7 @@ function normalizeAirportProxies(proxies) {
   // 关键策略：在 Sub-Store v2.22.8 沙箱里 operator 必须**原地 mutate proxy 对象**——
   // Sub-Store 内部保留了原始对象引用，最终序列化（target=ClashMeta）从那些原始对象读字段。
   // 用 Object.assign 返回新对象的写法在测试中观察到 dialer-proxy 修改不被序列化采纳。
-  var frontierSeen = false;
+  var timeoutNames = getTimeoutResidentialNameSet();
   var renameMap = {};
   var intermediate = [];
   for (var i = 0; i < proxies.length; i++) {
@@ -421,15 +499,19 @@ function normalizeAirportProxies(proxies) {
       intermediate.push(proxy);
       continue;
     }
-    if (proxy.name === FRONTIER_NODE_NAME) {
-      if (!frontierSeen) {
-        frontierSeen = true;
-        intermediate.push(proxy);
-      }
-      continue;
-    }
     if (isInfoPseudoNode(proxy)) continue;
+    if (isNonDirectProxy(proxy)) continue;
+    if (isRetiredProviderProxy(proxy)) continue;
+    if (isTimeoutResidentialNode(proxy, timeoutNames)) continue;
     var normalizedName = normalizeAirportNodeName(proxy.name, proxy);
+    if (RETIRED_PROVIDER_PATTERN.test(normalizedName)) continue;
+    if (
+      hasResidentialTag(normalizedName) &&
+      (
+        timeoutNames[normalizedName] ||
+        timeoutNames[normalizedName.replace(/^[A-Z0-9]{2,8}\s*\|\s*/, '')]
+      )
+    ) continue;
     if (normalizedName !== proxy.name) {
       renameMap[proxy.name] = normalizedName;
       proxy.name = normalizedName;  // 原地 mutate
@@ -492,30 +574,6 @@ function normalizeAirportProxies(proxies) {
   return out;
 }
 
-function buildVpsFrontierNode() {
-  const server = getCred('vps_server');
-  const password = getCred('vps_password');
-  if (!server || !password) {
-    if (typeof console !== 'undefined' && console.log) {
-      console.log('[shadowrocket-injector] vps_server / vps_password 未提供，跳过 [VPS→家宽] 节点');
-    }
-    return null;
-  }
-  const portRaw = getCred('vps_port');
-  const port = parseInt(portRaw || '51388', 10);
-  const cipher = getCred('vps_cipher') || 'chacha20-ietf-poly1305';
-  return {
-    name: FRONTIER_NODE_NAME,
-    type: 'ss',
-    server: server,
-    port: port,
-    cipher: cipher,
-    password: password,
-    udp: true,
-    'no-resolve': false,
-  };
-}
-
 function operator(proxies, targetPlatform, context) {
   if (typeof console !== 'undefined' && console.log) {
     var dialerCount = 0;
@@ -529,13 +587,6 @@ function operator(proxies, targetPlatform, context) {
     console.log('[shadowrocket-injector] operator entry: target=' + targetPlatform + ' input_count=' + (Array.isArray(proxies) ? proxies.length : 'N/A') + ' input_dialer=' + dialerCount + ' input_underlying=' + underlyingCount);
   }
   const normalizedProxies = normalizeAirportProxies(proxies);
-  const node = buildVpsFrontierNode();
-  if (node) {
-    const exists = Array.isArray(normalizedProxies) && normalizedProxies.some(function (p) {
-      return p && p.name === node.name;
-    });
-    if (!exists) normalizedProxies.push(node);
-  }
   if (typeof console !== 'undefined' && console.log) {
     var outDialer = 0;
     var outOldRefs = 0;
@@ -551,16 +602,14 @@ function operator(proxies, targetPlatform, context) {
   return normalizedProxies;
 }
 
-if (typeof globalThis !== 'undefined') {
-  globalThis.operator = operator;
-}
-
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     operator: operator,
-    buildVpsFrontierNode: buildVpsFrontierNode,
     normalizeAirportNodeName: normalizeAirportNodeName,
     normalizeAirportProxies: normalizeAirportProxies,
     isInfoPseudoNode: isInfoPseudoNode,
+    isNonDirectProxy: isNonDirectProxy,
+    isRetiredProviderProxy: isRetiredProviderProxy,
+    isTimeoutResidentialNode: isTimeoutResidentialNode,
   };
 }

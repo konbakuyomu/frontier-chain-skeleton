@@ -7,120 +7,32 @@
  * 入口约定：
  *   - 导出 globalThis.main = function main(config)，接收 mihomo 完整配置对象，返回修改后的配置
  *   - Sparkle override 兼容这种签名（旧版用 operator(proxies) 包装，新版直接吃 main(config)）
- *   - Sub-Store mihomoProfile 文件类型在 backend 内部会调用 globalThis.main(config)
+ *   - Sub-Store mihomoProfile 文件类型通过 operator(input) 消费上一个 operator 的 $content
  *
- * 必需的 $arguments 参数（不在仓库里硬编码——全部运行时注入）：
- *   scrapegw_host / scrapegw_port / scrapegw_user / scrapegw_pass
- *   frontier_server / frontier_port / frontier_password / frontier_cipher
- *   vps_server / vps_port / vps_password / vps_cipher
- *   详见同目录 README.md
- *
- * 凭据注入两条通道（resolver 内置优先级）：
- *   1. Sub-Store 通过 URL fragment 把参数解析到 $arguments
- *   2. Sparkle 通过本地 patch 脚本（先于此脚本运行）写到 globalThis.__creds
+ * 运行时参数：
+ *   当前版本不再读取住宅代理供应商凭据。家宽节点全部来自 Sub-Store
+ *   merged-airports 上游订阅池，客户端通过稳定的「🏡 家宽选择」selector 手选。
  *
  * 仓库：https://github.com/konbakuyomu/frontier-chain-skeleton
  * 许可：MIT（建议）
  */
 
 
-// ============================================================
-// 凭据 resolver——优先 $arguments，其次 globalThis.__creds，最后兜底占位
-// ============================================================
-
-function getCred(key, fallback) {
-  if (fallback === undefined) fallback = "<INJECT_AT_RUNTIME>";
-
-  // 优先级 1: Sub-Store $arguments
-  if (typeof $arguments !== "undefined" && $arguments && $arguments[key] != null) {
-    return $arguments[key];
-  }
-  // 优先级 2: Sparkle 本地 patch 脚本注入到 globalThis.__creds
-  if (typeof globalThis !== "undefined" && globalThis.__creds && globalThis.__creds[key] != null) {
-    return globalThis.__creds[key];
-  }
-  // 优先级 3: 占位符——不应在生产命中，命中说明凭据通道没配
-  return fallback;
-}
-
-function getCredInt(key, fallback) {
-  const v = getCred(key, fallback);
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-let __credsWarnedOnce = false;
-function warnIfNoCreds() {
-  if (__credsWarnedOnce) return;
-  __credsWarnedOnce = true;
-  const haveArgs = typeof $arguments !== "undefined" && $arguments && Object.keys($arguments).length > 0;
-  const haveLocal = typeof globalThis !== "undefined" && globalThis.__creds && Object.keys(globalThis.__creds).length > 0;
-  if (!haveArgs && !haveLocal) {
-    logWarn("未检测到任何凭据注入通道（$arguments / globalThis.__creds 均空）。家宽链路将以占位符落地，节点无法连通。");
-  }
-}
-
-
-// ============================================================
-// 家宽列表（结构透明可见，敏感字段全部走 getCred）
-// ============================================================
-
-const RESIDENTIALS = [
-  // #1 Frontier 美国家宽（SS，带 VPS 服务端链）
-  {
-    enabled: true,
-    name: "Frontier",
-    region: "US",
-    type: "ss",
-    server: getCred("frontier_server"),
-    port: getCredInt("frontier_port", 1145),
-    cipher: getCred("frontier_cipher", "chacha20-ietf-poly1305"),
-    password: getCred("frontier_password"),
-    udp: true,
-    vps: {
-      enabled: true,
-      server: getCred("vps_server"),
-      port: getCredInt("vps_port", 51388),
-      cipher: getCred("vps_cipher", "chacha20-ietf-poly1305"),
-      password: getCred("vps_password"),
-    },
-  },
-
-  // #2 ScrapeGW 德国住宅池（SOCKS5）
-  {
-    enabled: true,
-    name: "ScrapeGW",
-    region: "DE",
-    type: "socks5",
-    server: getCred("scrapegw_host"),
-    port: getCredInt("scrapegw_port", 6060),
-    username: getCred("scrapegw_user"),
-    password: getCred("scrapegw_pass"),
-    udp: false,
-  },
-];
-
 const AI = {
   enabled: true,
   targetGroup: "AI服务",
 };
 
+const UPSTREAM_MIHOMO_MAIN = (() => {
+  if (typeof globalThis === "undefined" || typeof globalThis.main !== "function") return null;
+  if (globalThis.__frontierSkeletonMain && globalThis.main === globalThis.__frontierSkeletonMain) return null;
+  return globalThis.main;
+})();
+
 
 // ============================================================
-// 地区元数据 / 过滤正则（公共信息，可见）
+// 过滤正则（公共信息，可见）
 // ============================================================
-
-const REGION_META = {
-  US: { groupName: "🇺🇸 US前置", filter: "(?i)(?:^|\\|\\s*)美国-|🇺🇸|\\bUS\\b|United States" },
-  DE: { groupName: "🇩🇪 DE前置", filter: "(?i)(?:^|\\|\\s*)德国-|🇩🇪|\\bDE\\b|Germany" },
-  JP: { groupName: "🇯🇵 JP前置", filter: "(?i)(?:^|\\|\\s*)日本-|🇯🇵|\\bJP\\b|Japan|东京|大阪" },
-  HK: { groupName: "🇭🇰 HK前置", filter: "(?i)(?:^|\\|\\s*)香港-|🇭🇰|\\bHK\\b|Hong ?Kong" },
-  SG: { groupName: "🇸🇬 SG前置", filter: "(?i)(?:^|\\|\\s*)新加坡-|🇸🇬|\\bSG\\b|Singapore" },
-  UK: { groupName: "🇬🇧 UK前置", filter: "(?i)(?:^|\\|\\s*)英国-|🇬🇧|\\bUK\\b|\\bGB\\b|United Kingdom|伦敦" },
-};
-
-const EXCLUDE_FILTER =
-  "(?i)家宽|链式|VPS|落地|下载|Download|剩余|套餐|距离|0\\.01x";
 
 const BUILTIN_RULE_TARGETS = new Set(["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"]);
 
@@ -146,71 +58,6 @@ function compileFilter(mihomoFilter) {
     return new RegExp(mihomoFilter.slice(4), "i");
   }
   return new RegExp(mihomoFilter);
-}
-
-function buildFrontProxyGroups(config, usedRegions) {
-  const groups = [];
-  const excludeRe = compileFilter(EXCLUDE_FILTER);
-  for (const region of usedRegions) {
-    const meta = REGION_META[region];
-    if (!meta) {
-      logWarn(`region "${region}" 未在 REGION_META 中定义，跳过`);
-      continue;
-    }
-    const regionRe = compileFilter(meta.filter);
-    const hit = (config.proxies || []).some(p =>
-      regionRe.test(p.name) && !excludeRe.test(p.name)
-    );
-    if (!hit) {
-      logInfo(`跳过 ${region}：当前订阅无可用 ${meta.groupName} 候选节点`);
-      continue;
-    }
-    groups.push({
-      name: meta.groupName,
-      type: "url-test",
-      "include-all": true,
-      filter: meta.filter,
-      "exclude-filter": EXCLUDE_FILTER,
-      url: "https://cp.cloudflare.com/generate_204",
-      interval: 300,
-      tolerance: 50,
-      lazy: true,
-      // 与 powerfullz "前置代理" 组同款 Koolson/Qure 图标，Sparkle UI 显示更协调
-      icon: "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Area.png",
-    });
-  }
-  return groups;
-}
-
-function buildResidentialNode(r, regionGroupName) {
-  const base = {
-    name: `🏠 [机场→家宽] ${r.name}`,
-    type: r.type,
-    server: r.server,
-    port: r.port,
-    udp: r.udp,
-  };
-  if (r.type === "ss") {
-    Object.assign(base, { cipher: r.cipher, password: r.password });
-  } else if (r.type === "socks5" || r.type === "http") {
-    Object.assign(base, { username: r.username, password: r.password });
-    if (r.tls) base.tls = true;
-  }
-  if (regionGroupName) base["dialer-proxy"] = regionGroupName;
-  return base;
-}
-
-function buildVpsNode(r) {
-  if (r.type !== "ss" || !r.vps?.enabled) return null;
-  return {
-    name: `🏠 [VPS→家宽] ${r.name}`,
-    type: "ss",
-    server: r.vps.server,
-    port: r.vps.port,
-    cipher: r.vps.cipher,
-    password: r.vps.password,
-    udp: true,
-  };
 }
 
 function resolveGroup(config, options) {
@@ -329,6 +176,10 @@ function expandIncludeAllGroups(config) {
   let expanded = 0;
   for (const group of groups) {
     if (!group || group["include-all"] !== true) continue;
+    if (group.name === "🏡 家宽选择") {
+      logInfo(`保留 include-all 组 "${group.name}"，让 mihomo 客户端动态吸纳家宽候选`);
+      continue;
+    }
 
     let candidates = allProxyNames.slice();
     if (typeof group.filter === "string" && group.filter.length > 0) {
@@ -378,52 +229,6 @@ function expandIncludeAllGroups(config) {
 // ============================================================
 
 function main(config) {
-  warnIfNoCreds();
-
-  // 1. 收集启用的家宽与用到的地区
-  const enabled = RESIDENTIALS.filter(r => r && r.enabled);
-  const usedRegions = [...new Set(enabled.map(r => r.region))];
-
-  // 2. 按地区生成 url-test 前置组（带预检）
-  const frontGroups = buildFrontProxyGroups(config, usedRegions);
-  const existingGroupNames = new Set(frontGroups.map(g => g.name));
-
-  // 3. 生成家宽节点
-  // 去重：当上游订阅来自 VPS Sub-Store（Collection `merged-airports` 的 Script Operator 已注入
-  // `🏠 [VPS→家宽] Frontier`）时，本地不再重复造同名 VPS 节点。机场→家宽链节点 Sub-Store 不造，
-  // 本地继续负责。
-  const upstreamProxyNames = new Set(
-    (config.proxies || []).map(p => p && p.name).filter(Boolean)
-  );
-  const myNodes = [];
-  for (const r of enabled) {
-    const vpsNode = buildVpsNode(r);
-    if (vpsNode) {
-      if (upstreamProxyNames.has(vpsNode.name)) {
-        logInfo(`${r.name} 的 VPS 节点已由上游 Sub-Store 注入，本地跳过`);
-      } else {
-        myNodes.push(vpsNode);
-      }
-    }
-
-    const groupName = REGION_META[r.region]?.groupName;
-    if (existingGroupNames.has(groupName)) {
-      myNodes.push(buildResidentialNode(r, groupName));
-    } else if (r.vps?.enabled && r.type === "ss") {
-      logInfo(`${r.name} 的机场链式节点被跳过（无 ${r.region} 前置候选），但 VPS 节点已注入`);
-    } else {
-      logWarn(`${r.name} 无法注入：${r.region} 前置组不存在且无 VPS 兜底`);
-    }
-  }
-
-  // 4. 合并进 config
-  if (myNodes.length > 0) {
-    config.proxies = [...(config.proxies || []), ...myNodes];
-  }
-  if (frontGroups.length > 0) {
-    config["proxy-groups"] = [...(config["proxy-groups"] || []), ...frontGroups];
-  }
-
   // ================================================
   // ===== DNS 防泄露 + TUN 兼容性（强制覆盖）=====
   // ================================================
@@ -653,20 +458,21 @@ function main(config) {
   // 唯一的"用户插槽"。新增分流规则统一在 userRules 数组内追加，不要再造新块。
   // ================================================
   {
-    const residentialNodeName = "🏠 [VPS→家宽] Frontier";
     // 注：组挂了大图标（icon 字段），组名故意不带 emoji 前缀
     // 详见 .trellis/spec/network/proxy-group-flexibility.md §5 图标 + 命名规则
     const paypalGroupName = "PayPal";
+    const RESIDENTIAL_SELECTOR_NAME = "🏡 家宽选择";
 
     // Koolson/Qure 图标库 base（与 powerfullz 国家组同款，Sparkle UI 显示协调）
     const ICON_BASE = "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color";
+    const RESIDENTIAL_SELECTOR_ICON = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3e1.png";
 
     // ===== 区域家宽矩阵（spec §6）=====
     // 来源：cherry-pick Smart-Config-Kit/Shadowrocket.conf 行 119-152 的 9 区域 url-test 定义
     // 关键设计：filter 用 (区域).*(家宽)|(家宽).*(区域) 双向匹配，命中"美国-家宽-LA-1"或"Resi-Tokyo-01"两类命名
     // 双端一致性：Shadowrocket.conf 必须同步等价 9 区域家宽组（见 spec §6 一致性表）
     const RESIDENTIAL_PATTERN = "[Rr]esi(dential)?|[Hh]ome[-_ ]?[Ii][Pp]|[Hh]ome[-_ ]?[Bb]roadband|[Bb]roadband|[Ii][Ss][Pp]|家宽|家庭宽带|家庭住宅|住宅宽带|住宅|宽带";
-    const EXCLUDE_INFO_PATTERN = "导航|剩余|套餐|到期|重置|官网|订阅|回国|回程|国内专线";
+    const EXCLUDE_INFO_PATTERN = "导航|剩余|套餐|到期|重置|官网|订阅|回国|回程|国内专线|地址|保底|客服|流量|距离下次|不可直连|小白不要连接";
 
     // 每个区域 regionPattern 直接 cherry-pick Smart-Config-Kit policy-regex-filter 的国家段
     // 顺序：从大到小（全球 → 大洲/区域聚合 → 单国），UI 排列上下文从宽到窄
@@ -717,6 +523,19 @@ function main(config) {
         icon: `${ICON_BASE}/Africa_Map.png`,
       },
     ];
+    const REGION_RESIDENTIAL_NAMES = new Set(REGION_RESIDENTIAL_GROUPS.map(g => g.name));
+    const withoutRegionResidentialGroups = (items) =>
+      (Array.isArray(items) ? items : []).filter(name => !REGION_RESIDENTIAL_NAMES.has(name));
+    const uniqueProxyList = (items) => {
+      const seen = new Set();
+      const out = [];
+      for (const item of items) {
+        if (!item || seen.has(item)) continue;
+        seen.add(item);
+        out.push(item);
+      }
+      return out;
+    };
 
     const pgList = Array.isArray(config["proxy-groups"]) ? config["proxy-groups"] : [];
 
@@ -784,26 +603,80 @@ function main(config) {
       residentialHitGroupNames.add(meta.name);
     }
 
+    // 1b) 稳定家宽手动 selector。业务组只引用这个选择层，不引用任何具体供应商节点名。
+    const residentialSelectorHead = [
+      "🏡 全球家宽",
+      "🏡 美国家宽",
+      "🏡 日韩家宽",
+      "🏡 亚太家宽",
+      "🏡 香港家宽",
+      "🏡 台湾家宽",
+      "🏡 欧洲家宽",
+      "🏡 美洲家宽",
+      "🏡 非洲家宽",
+    ].filter(name => residentialHitGroupNames.has(name));
+    const residentialSelectorProxies = residentialSelectorHead.length > 0
+      ? residentialSelectorHead
+      : ["DIRECT"];
+    const residentialSelector = pgList.find(g => g && g.name === RESIDENTIAL_SELECTOR_NAME);
+    if (residentialSelector) {
+      residentialSelector.type = "select";
+      residentialSelector.proxies = [...residentialSelectorProxies];
+      residentialSelector["include-all"] = true;
+      residentialSelector.filter = RESIDENTIAL_PATTERN;
+      residentialSelector["exclude-filter"] = EXCLUDE_INFO_PATTERN;
+      residentialSelector.icon = RESIDENTIAL_SELECTOR_ICON;
+    } else {
+      pgList.splice(residentialInsertCursor, 0, {
+        name: RESIDENTIAL_SELECTOR_NAME,
+        type: "select",
+        proxies: [...residentialSelectorProxies],
+        "include-all": true,
+        filter: RESIDENTIAL_PATTERN,
+        "exclude-filter": EXCLUDE_INFO_PATTERN,
+        icon: RESIDENTIAL_SELECTOR_ICON,
+      });
+      residentialInsertCursor += 1;
+    }
+
+    // 1c) 顶层「选择代理」也必须能手动切到家宽选择层。
+    //     插在「自动选择/故障转移」之后，保留原默认入口不变。
+    const primarySelectGroup = pgList.find(g => g && g.name === selectGroup && Array.isArray(g.proxies));
+    if (primarySelectGroup && !primarySelectGroup.proxies.includes(RESIDENTIAL_SELECTOR_NAME)) {
+      const preferredAfter = ["故障转移", "自动选择"];
+      let insertAt = 0;
+      for (const anchor of preferredAfter) {
+        const idx = primarySelectGroup.proxies.indexOf(anchor);
+        if (idx >= 0) insertAt = Math.max(insertAt, idx + 1);
+      }
+      primarySelectGroup.proxies.splice(insertAt, 0, RESIDENTIAL_SELECTOR_NAME);
+    }
+
     // 2) upsert PayPal 专属选择组（UI 可切：家宽优先，附带 AI 服务整套国家/低倍率/手动选项）
     //    复用 powerfullz 生成的 "AI服务" 组的 proxies，未来 powerfullz 加新国家时 PayPal 自动跟随
     //    位置：插入到 AI服务 之后，与同类业务组（苹果服务/谷歌服务/...）聚集，UI 显示连贯
     const aiGroup = pgList.find(g => g && g.name === "AI服务");
     const aiProxiesClone = (aiGroup && Array.isArray(aiGroup.proxies)) ? [...aiGroup.proxies] : [];
-    if (!pgList.some(g => g && g.name === paypalGroupName)) {
+    const paypalGroup = pgList.find(g => g && g.name === paypalGroupName);
+    const paypalBase = aiProxiesClone.length > 0
+      ? aiProxiesClone
+      : [selectGroup, "DIRECT"];
+    const paypalProxies = uniqueProxyList([
+      RESIDENTIAL_SELECTOR_NAME,
+      ...withoutRegionResidentialGroups(paypalBase),
+    ]);
+    if (paypalGroup) {
+      paypalGroup.type = "select";
+      paypalGroup.proxies = paypalProxies;
+      paypalGroup.icon = `${ICON_BASE}/PayPal.png`;
+    } else {
       const aiIdx = pgList.findIndex(g => g && g.name === "AI服务");
       const insertAt = aiIdx >= 0 ? aiIdx + 1 : pgList.length;
-      // PayPal 主走美国家宽（与 spec §6 默认锁定语义一致）：
-      // 顺序 = [VPS→家宽 Frontier 直接节点, 🏡 美国家宽 url-test 自动测速] + AI服务 完整面板
-      // 若 🏡 美国家宽 因 hit 预检被跳过（订阅无 US 家宽候选），PayPal 兜底不引用
-      const paypalHead = residentialHitGroupNames.has("🏡 美国家宽")
-        ? [residentialNodeName, "🏡 美国家宽"]
-        : [residentialNodeName];
       pgList.splice(insertAt, 0, {
         name: paypalGroupName,
         type: "select",
-        proxies: aiProxiesClone.length > 0
-          ? [...paypalHead, ...aiProxiesClone]
-          : [...paypalHead, selectGroup, "DIRECT"],
+        // PayPal 主走稳定家宽选择层；用户在该 selector 内手选具体家宽节点。
+        proxies: paypalProxies,
         icon: `${ICON_BASE}/PayPal.png`,
       });
     }
@@ -815,18 +688,15 @@ function main(config) {
     //     （来源：FlClash lib/common/task.dart 的 _toGroupsTask 过滤逻辑）
     const globalGroup = pgList.find(g => g && g.name === "GLOBAL");
     if (globalGroup && Array.isArray(globalGroup.proxies)) {
+      globalGroup.proxies = withoutRegionResidentialGroups(globalGroup.proxies);
       const aiIdxInGlobal = globalGroup.proxies.indexOf("AI服务");
       let insertGlobalAt = aiIdxInGlobal >= 0 ? aiIdxInGlobal + 1 : globalGroup.proxies.length;
-      if (!globalGroup.proxies.includes(paypalGroupName)) {
-        globalGroup.proxies.splice(insertGlobalAt, 0, paypalGroupName);
+      if (!globalGroup.proxies.includes(RESIDENTIAL_SELECTOR_NAME)) {
+        globalGroup.proxies.splice(insertGlobalAt, 0, RESIDENTIAL_SELECTOR_NAME);
         insertGlobalAt += 1;
       }
-      // 9 区域家宽组紧贴 PayPal 之后注入 GLOBAL.proxies（spec §4a：UI 显示必需）
-      // 仅注入实际存在的组（被 hit 预检跳过的组不要塞进 GLOBAL.proxies，否则 mihomo 报 unknown proxy name）
-      for (const meta of REGION_RESIDENTIAL_GROUPS) {
-        if (!residentialHitGroupNames.has(meta.name)) continue;
-        if (globalGroup.proxies.includes(meta.name)) continue;
-        globalGroup.proxies.splice(insertGlobalAt, 0, meta.name);
+      if (!globalGroup.proxies.includes(paypalGroupName)) {
+        globalGroup.proxies.splice(insertGlobalAt, 0, paypalGroupName);
         insertGlobalAt += 1;
       }
     }
@@ -867,26 +737,22 @@ function main(config) {
       logInfo(`用户自定义规则注入：${insertedUserRules.length} 条 → ${paypalGroupName}/DIRECT`);
     }
 
-    // 5) 业务组镜像家宽组（spec §6.9）
+    // 5) 业务组镜像家宽选择层（spec §6.9）
     //    powerfullz 自动生成的业务组（AI服务/苹果服务/谷歌服务/Netflix/...）proxies 默认只含
     //    18 国 + 选择代理 + 低倍率 + 手动选择 + 直连共 21 项，**不含**我们的 🏡 *家宽 组。
-    //    这里把全部 select 类型的非工具组遍历一遍，末尾追加 5 个非空家宽组——让用户在任何
-    //    业务组下拉里都能切到家宽（例：Netflix 默认走 powerfullz 国家组，偶尔风控想切 🏡 美国家宽）。
+    //    这里把全部 select 类型的非工具组遍历一遍，只追加稳定的 🏡 家宽选择。
+    //    区域家宽组留在 🏡 家宽选择 内部，避免每个业务组都摊开 9 个家宽选项。
     //    push 到末尾不改 default，原 powerfullz 选首项的默认行为保留。
-    //
-    //    ⚠️ 同时追加 3 个具体家宽节点（spec §6.9 持久锁定）：
-    //    🏡 *家宽 组是 url-test 类型，按 interval=300 周期性测速；用户在 UI 里手动锁定的
-    //    "具体家宽节点"会在下一轮测速后被自动覆盖。要让"用户手选具体节点"持久化，必须
-    //    把节点名直接列进业务组（select 类型）proxies——select 的手选会持久到 mihomo cache。
-    //    所以同一循环里再 push 3 个本地生成 / 上游 Sub-Store 注入的家宽节点。
+    //    具体家宽节点只出现在 🏡 家宽选择 内部，由 include-all + filter 动态吸纳。
     const TOOL_GROUPS_EXCLUDE = new Set([
       "GLOBAL",
       "选择代理", "手动选择", "自动选择", "故障转移",
       "落地节点", "低倍率节点", "静态资源", "前置代理",
       "直连", "DIRECT", "REJECT",
+      RESIDENTIAL_SELECTOR_NAME,
       "广告拦截",  // spec §3 例外：拦截语义不需切代理
-      // PayPal 不再排除：业务组镜像循环统一注入 5 家宽组 + 3 家宽节点
-      // includes 检查保护去重（PayPal 头部已含 🏠 [VPS→家宽] Frontier / 🏡 美国家宽 → 跳过）
+      // PayPal 不再排除：业务组镜像循环统一注入家宽选择层。
+      // includes 检查保护去重（PayPal 头部已含 🏡 家宽选择 → 跳过）
     ]);
 
     const businessGroups = pgList.filter(g =>
@@ -896,44 +762,15 @@ function main(config) {
       Array.isArray(g.proxies)
     );
 
-    // 硬编码的家宽节点名（来源：buildVpsNode / buildResidentialNode + 上游 Sub-Store Collection
-    // Script Operator 注入；命名稳定可写死）
-    // - 🏠 [VPS→家宽] Frontier   ：本地 buildVpsNode + Sub-Store 注入（去重后存在）
-    // - 🏠 [机场→家宽] Frontier  ：本地 buildResidentialNode 链式注入（mihomo 独有产物）
-    // - 🏠 [机场→家宽] ScrapeGW  ：同上
-    // 防御：节点未实际生成（机场无候选 / VPS 凭据缺失）则跳过，避免 push 不存在节点导致 mihomo schema 错误
-    const RESIDENTIAL_NODES = [
-      "🏠 [VPS→家宽] Frontier",
-      "🏠 [机场→家宽] Frontier",
-      "🏠 [机场→家宽] ScrapeGW",
-    ];
-    const allProxyNamesSet = new Set(
-      (config.proxies || []).map(p => p && p.name).filter(Boolean)
-    );
-    const availableResidentialNodes = RESIDENTIAL_NODES.filter(n => allProxyNamesSet.has(n));
-    const skippedResidentialNodes = RESIDENTIAL_NODES.filter(n => !allProxyNamesSet.has(n));
-    if (skippedResidentialNodes.length > 0) {
-      logInfo(`业务组镜像跳过未生成的家宽节点：${skippedResidentialNodes.join(", ")}`);
-    }
-
     let mirroredCount = 0;
-    let mirroredNodeCount = 0;
     for (const g of businessGroups) {
-      // 5a) push 5 个非空家宽组（url-test 自动测速）
-      for (const meta of REGION_RESIDENTIAL_GROUPS) {
-        if (!residentialHitGroupNames.has(meta.name)) continue;  // 跳过 hit 预检失败的（4 个空组）
-        if (g.proxies.includes(meta.name)) continue;
-        g.proxies.push(meta.name);
+      g.proxies = withoutRegionResidentialGroups(g.proxies);
+      if (!g.proxies.includes(RESIDENTIAL_SELECTOR_NAME)) {
+        g.proxies.push(RESIDENTIAL_SELECTOR_NAME);
         mirroredCount++;
       }
-      // 5b) push 3 个具体家宽节点（select 选中后持久锁定，不被 url-test 周期覆盖）
-      for (const nodeName of availableResidentialNodes) {
-        if (g.proxies.includes(nodeName)) continue;
-        g.proxies.push(nodeName);
-        mirroredNodeCount++;
-      }
     }
-    logInfo(`业务组镜像家宽组完成：${businessGroups.length} 组追加，共 ${mirroredCount} 处组插入 + ${mirroredNodeCount} 处节点插入`);
+    logInfo(`业务组镜像家宽选择层完成：${businessGroups.length} 组追加，共 ${mirroredCount} 处组插入`);
   }
 
   // ================================================
@@ -947,9 +784,69 @@ function main(config) {
 
 
 // ============================================================
-// 入口暴露——同时兼容 Sparkle / Sub-Store / iPhone Shadowrocket
+// 入口暴露——兼容 Sparkle / Sub-Store mihomoProfile
 // ============================================================
+
+async function operator(input = [], targetPlatform, context) {
+  if (
+    input &&
+    typeof input === "object" &&
+    !Array.isArray(input) &&
+    input.$file &&
+    input.$file.type === "mihomoProfile"
+  ) {
+    if (!input.$content) {
+      if (typeof UPSTREAM_MIHOMO_MAIN !== "function" || typeof produceArtifact !== "function") {
+        logWarn("Sub-Store mihomoProfile 缺少上游 $content，且没有可用上游 main，跳过 skeleton main");
+        return input;
+      }
+      const upstreamInput = {
+        proxies: await produceArtifact({
+          type: input.$file.sourceType || "collection",
+          name: input.$file.sourceName,
+          platform: "mihomo",
+          produceType: "internal",
+          produceOpts: { "delete-underscore-fields": true },
+        }),
+      };
+      const upstreamConfig = await UPSTREAM_MIHOMO_MAIN(upstreamInput);
+      input.$content = ProxyUtils.yaml.safeDump(await main(upstreamConfig));
+      return input;
+    }
+
+    let config = null;
+    try {
+      config = ProxyUtils.yaml.safeLoad(input.$content);
+    } catch (e) {
+      logWarn(`Sub-Store mihomoProfile content 解析失败，跳过 skeleton main：${e && e.message ? e.message : e}`);
+      return input;
+    }
+    if (!config || typeof config !== "object") {
+      logWarn("Sub-Store mihomoProfile content 不是有效配置对象，跳过 skeleton main");
+      return input;
+    }
+
+    input.$content = ProxyUtils.yaml.safeDump(await main(config));
+    return input;
+  }
+
+  if (
+    input &&
+    typeof input === "object" &&
+    !Array.isArray(input) &&
+    (Array.isArray(input.proxies) || Array.isArray(input["proxy-groups"]) || Array.isArray(input.rules))
+  ) {
+    return main(input);
+  }
+
+  return input;
+}
 
 if (typeof globalThis !== "undefined") {
   globalThis.main = main;
+  globalThis.__frontierSkeletonMain = main;
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { main, operator };
 }

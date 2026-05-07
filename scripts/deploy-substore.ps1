@@ -35,6 +35,10 @@ param(
 
   [string]$SubStoreDir = '/opt/1panel/apps/sub-store/sub-store',
   [string]$ContainerName = 'sub-store',
+  [string]$ResidentialAggregatorUrl = $env:FRONTIER_RESIDENTIAL_AGGREGATOR_URL,
+  [string]$ResidentialAggregatorName = 'aggregated-residential',
+  [string]$ResidentialAggregatorDisplayName = '家宽聚合订阅',
+  [string]$ResidentialAggregatorSourcePrefix = 'AGG',
   [switch]$NoBackup,
   [switch]$NoRestart
 )
@@ -105,6 +109,9 @@ function Quote-Remote($Text) {
 }
 
 $selected = Get-SelectedTargets
+if ($ResidentialAggregatorUrl -and -not ($selected -contains 'source-marker')) {
+  $selected = @('source-marker') + $selected
+}
 
 Write-Info "repo root: $RepoRoot"
 Write-Info "targets: $($selected -join ', ')"
@@ -135,6 +142,9 @@ if (-not $Apply) {
   Write-Host 'No VPS files were changed. Re-run with -Apply to patch Sub-Store.'
   foreach ($target in $selected) {
     Write-Host ("  {0,-18} -> {1}" -f $target, $Files[$target])
+  }
+  if ($ResidentialAggregatorUrl) {
+    Write-Host ("  {0,-18} -> {1} ({2})" -f 'residential-upstream', $ResidentialAggregatorName, $ResidentialAggregatorSourcePrefix)
   }
   exit 0
 }
@@ -190,14 +200,34 @@ try {
   if ($selected -contains 'powerfullz-updater') {
     $cmd += @('--powerfullz-updater', (Quote-Remote "$remoteStage/update-powerfullz-inline.py"))
   }
+  if ($ResidentialAggregatorUrl) {
+    $cmd += @(
+      '--aggregator-url-stdin',
+      '--aggregator-name', (Quote-Remote $ResidentialAggregatorName),
+      '--aggregator-display-name', (Quote-Remote $ResidentialAggregatorDisplayName),
+      '--aggregator-source-prefix', (Quote-Remote $ResidentialAggregatorSourcePrefix)
+    )
+  }
   if ($NoBackup) { $cmd += '--no-backup' }
   if ($NoRestart) { $cmd += '--no-restart' }
 
   Write-Info 'applying remote patch'
-  & ssh @sshArgs ($cmd -join ' ')
+  if ($ResidentialAggregatorUrl) {
+    $ResidentialAggregatorUrl | & ssh @sshArgs ($cmd -join ' ')
+  } else {
+    & ssh @sshArgs ($cmd -join ' ')
+  }
   if ($LASTEXITCODE -ne 0) { throw 'remote apply failed' }
   Write-Ok 'Sub-Store deploy finished'
 } finally {
   Write-Info 'cleaning remote staging'
-  & ssh @sshArgs ("rm -rf " + (Quote-Remote $remoteStage)) | Out-Null
+  $cleanupCmd = @(
+    'rm -f ' + (Quote-Remote "$remoteStage/remote-apply-substore.py"),
+    'rm -f ' + (Quote-Remote "$remoteStage/substore-source-marker.js"),
+    'rm -f ' + (Quote-Remote "$remoteStage/shadowrocket-nodes-injector.js"),
+    'rm -f ' + (Quote-Remote "$remoteStage/main.js"),
+    'rm -f ' + (Quote-Remote "$remoteStage/update-powerfullz-inline.py"),
+    'rmdir ' + (Quote-Remote $remoteStage) + ' 2>/dev/null || true'
+  ) -join ' && '
+  & ssh @sshArgs $cleanupCmd | Out-Null
 }
