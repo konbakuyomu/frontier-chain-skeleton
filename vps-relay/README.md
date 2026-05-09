@@ -1,6 +1,6 @@
 # vps-relay
 
-VPS-LA 链式代理生成器：把 cnqq aggregated-residential 里**本机超时但 VPS 视角能拨通**的家宽节点，自动包装成可被三端（Sparkle / FlClash / Shadowrocket）直接消费的 vmess+ws+TLS 节点。
+VPS-LA 链式代理生成器：把 `L3-L4 VPS链式原料池` 里**本机不应直连但 VPS 视角能拨通**的家宽节点，自动包装成可被三端（Sparkle / FlClash / Shadowrocket）直接消费的 vmess+ws+TLS 节点。
 
 > 单一信息源 = `chain-registry.tsv`。改这一个文件 → 跑 `bash scripts/deploy-relay.sh` → mihomo-relay / nginx / Sub-Store 全自动同步。
 
@@ -53,10 +53,12 @@ config.yaml      relay.conf            vmess-bundle.txt
 
 ## 节点命名约定
 
-- 输出节点名 = `🏡 链式 <client_display_name> 家宽`
+- 输出节点名 = `chain-registry.tsv` 第四列完整值
+- `L3-VPS-AGG | ...` = 本地 → VPS-LA → 聚合家宽原料 → 出口
+- `L4-VPS-VIRCS | ...` = 本地 → VPS-LA → VIRCS 家宽原料 → 出口
 - 含 `家宽` 二字 → 被 main.js 的 `RESIDENTIAL_PATTERN` 命中 → 自动入 `🏡 家宽选择` selector
 - 含中文区域（美国 / 法国 / ...）→ 被区域 url-test 组（`🏡 美国家宽` / `🏡 欧洲家宽`）命中
-- 加 `链式` 前缀 → 跟直连节点视觉区分
+- 含 `链式` → 跟普通直连节点视觉区分
 
 ## 凭据管理
 
@@ -78,7 +80,8 @@ SSH_TARGET=vps
 
 1. **VPS-LA mihomo-relay 容器**已部署（参 `.trellis/tasks/05-08-vps-residential-chain-feasibility/deploy/mihomo-relay/`）
 2. **1Panel openresty 反代** `<RELAY_PUBLIC_HOST>` 已支持 WebSocket
-3. **Sub-Store sub `vps-chain-residential`** 存在（local 类型，content 可初始为空）已加进 merged-airports collection 的 subscriptions
+3. **Sub-Store collection `user-landing-airports`** 是统一 VPS 链式原料池，包含 `aggregated-residential` 和 VPS-only 原始上游
+4. **Sub-Store sub `vps-chain-residential`** 存在（local 类型，content 可初始为空）已加进 merged-airports collection 的 subscriptions
 
 如果上述任一未就绪，参 `.trellis/tasks/05-08-vps-residential-chain-feasibility/deploy/USER-MANUAL.md`。
 

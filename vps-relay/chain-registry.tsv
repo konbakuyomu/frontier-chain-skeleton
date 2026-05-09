@@ -7,35 +7,35 @@
 #   idx                 - 链式编号（决定 mihomo listener port = 18442+idx 与 ws-path suffix）
 #   region              - 区域 tag（仅分类，不影响功能）
 #   upstream_node_name  - cnqq aggregated-residential 内原节点 name（必须精确匹配，含 emoji）
-#   client_display_name - 客户端订阅看到的名字（generate.py 自动加「🏡 链式 ... 家宽」前后缀）
+#   client_display_name - 客户端订阅看到的完整名字（建议带 L3/L4 路线前缀）
 #
 # 命名约束：upstream_node_name 含 emoji / | / 【】 等任何字符都行（TAB 是分隔符）
 # generate.py 自动从 upstream_node_name 列表派生 mihomo proxy-providers filter regex
 
 # idx	region	upstream_node_name	client_display_name
-01	US	cf加速|美国星链家宽	美国-cf星链
-02	US	cf加速|美国备用家宽一🇺🇸	美国-cf备用一
-03	US	cf加速|美国备用动态家宽三🇺🇸	美国-cf备用三
-04	US	【5x】中转|美国星链家宽🇺🇸	美国-中转星链 5x
-05	US	【5x】中转|美国备用家宽🇺🇸	美国-中转备用 5x
-06	US	【5x】中转|美国AT&T备用家宽	美国-中转AT&T 5x
-07	US	【5x】中转|美国备用家宽三🇺🇸	美国-中转备用三 5x
-08	US	【星链】美国星链家宽🇺🇸hy2	美国-星链 hy2
-09	US	美国-密西西比州Comcast家宽-001	美国-密西西比 Comcast
-10	US	【备用】美国洛杉矶备用家宽vless🇺🇸	美国-洛杉矶备用 vless
-11	US	【备用】美国洛杉矶家宽hy2🇺🇸	美国-洛杉矶 hy2
-12	US	【备用-2】美国AT&T备用家宽vless🇺🇸	美国-AT&T 备用 vless
-13	US	【备用-2】美国AT&T备用家宽hy2🇺🇸	美国-AT&T 备用 hy2
-14	CA	【5x】中转|加拿大家宽🇨🇦	加拿大-中转 5x
-15	CA	加拿大家宽🇨🇦hy2	加拿大-hy2
-16	UK	【5x】中转|英国家宽	英国-中转 5x
-17	EU	比利时家宽	比利时
-18	EU	【一】法国家宽	法国 一
-19	EU	【二】法国家宽	法国 二
-20	EU	【三】法国家宽	法国 三
-21	EU	【四】法国家宽	法国 四
-22	EU	【五】法国家宽	法国 五
-23	EU	荷兰家宽	荷兰
-24	EU	西班牙家宽	西班牙
-25	EU	意大利家宽	意大利
-26	US	微信kuma	美国-VIRCS ATT 白名单
+01	US	cf加速|美国星链家宽	L3-VPS-AGG | 美国-cf星链-家宽-链式
+02	US	cf加速|美国备用家宽一🇺🇸	L3-VPS-AGG | 美国-cf备用一-家宽-链式
+03	US	cf加速|美国备用动态家宽三🇺🇸	L3-VPS-AGG | 美国-cf备用三-家宽-链式
+04	US	【5x】中转|美国星链家宽🇺🇸	L3-VPS-AGG | 美国-中转星链-家宽-链式-5x
+05	US	【5x】中转|美国备用家宽🇺🇸	L3-VPS-AGG | 美国-中转备用-家宽-链式-5x
+06	US	【5x】中转|美国AT&T备用家宽	L3-VPS-AGG | 美国-中转AT&T-家宽-链式-5x
+07	US	【5x】中转|美国备用家宽三🇺🇸	L3-VPS-AGG | 美国-中转备用三-家宽-链式-5x
+08	US	【星链】美国星链家宽🇺🇸hy2	L3-VPS-AGG | 美国-星链-hy2-家宽-链式
+09	US	美国-密西西比州Comcast家宽-001	L3-VPS-AGG | 美国-密西西比Comcast-家宽-链式
+10	US	【备用】美国洛杉矶备用家宽vless🇺🇸	L3-VPS-AGG | 美国-洛杉矶备用-家宽-链式
+11	US	【备用】美国洛杉矶家宽hy2🇺🇸	L3-VPS-AGG | 美国-洛杉矶hy2-家宽-链式
+12	US	【备用-2】美国AT&T备用家宽vless🇺🇸	L3-VPS-AGG | 美国-AT&T备用-家宽-链式
+13	US	【备用-2】美国AT&T备用家宽hy2🇺🇸	L3-VPS-AGG | 美国-AT&T备用hy2-家宽-链式
+14	CA	【5x】中转|加拿大家宽🇨🇦	L3-VPS-AGG | 加拿大-中转-家宽-链式-5x
+15	CA	加拿大家宽🇨🇦hy2	L3-VPS-AGG | 加拿大-hy2-家宽-链式
+16	UK	【5x】中转|英国家宽	L3-VPS-AGG | 英国-中转-家宽-链式-5x
+17	EU	比利时家宽	L3-VPS-AGG | 比利时-家宽-链式
+18	EU	【一】法国家宽	L3-VPS-AGG | 法国-一-家宽-链式
+19	EU	【二】法国家宽	L3-VPS-AGG | 法国-二-家宽-链式
+20	EU	【三】法国家宽	L3-VPS-AGG | 法国-三-家宽-链式
+21	EU	【四】法国家宽	L3-VPS-AGG | 法国-四-家宽-链式
+22	EU	【五】法国家宽	L3-VPS-AGG | 法国-五-家宽-链式
+23	EU	荷兰家宽	L3-VPS-AGG | 荷兰-家宽-链式
+24	EU	西班牙家宽	L3-VPS-AGG | 西班牙-家宽-链式
+25	EU	意大利家宽	L3-VPS-AGG | 意大利-家宽-链式
+26	US	微信kuma	L4-VPS-VIRCS | 美国-VIRCS ATT-家宽-链式

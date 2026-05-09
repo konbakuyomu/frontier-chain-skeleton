@@ -85,7 +85,7 @@ def gen_mihomo_config(rows, secrets, out_path):
     ws_base = secrets["RELAY_WS_PATH"].rstrip("/")
     backend = secrets["BACKEND_PATH"]
 
-    # 从 chain-registry.tsv 派生 cnqq-residential provider filter regex
+    # 从 chain-registry.tsv 派生 vps-chain-upstreams provider filter regex
     # 只 fetch 链式 listener 实际需要的节点（精确 upstream name 匹配），不漏不污染
     # YAML 输出策略：filter 字符串里只 escape regex meta（不 escape Unicode），用 yaml single-quote 包围
     YAML_REGEX_META = r".^$*+?()[]{}|\\"
@@ -107,7 +107,7 @@ def gen_mihomo_config(rows, secrets, out_path):
     chain_outbound_groups = []
     for r in rows:
         # listener.proxy 字段不能直接引用 proxy-provider 内节点，要中转一层 group
-        # 每条 chain 一个 select group，use cnqq-residential + 精确 name filter
+        # 每条 chain 一个 select group，use 统一 VPS 链式原料池 + 精确 name filter
         single_filter = "^" + _escape_for_regex_in_yaml_singlequote(r["upstream"]) + "$"
         # YAML single-quote escape: ' -> ''
         single_filter_yaml = single_filter.replace("'", "''")
@@ -128,8 +128,7 @@ def gen_mihomo_config(rows, secrets, out_path):
             f"""  - name: chain-{r['idx']}-out
     type: select
     use:
-      - cnqq-residential
-      - user-landing
+      - vps-chain-upstreams
     filter: '{single_filter_yaml}'
 """
         )
@@ -148,22 +147,12 @@ listeners:
 {''.join(listener_blocks)}
 proxy-providers:
   # filter regex 由 chain-registry.tsv 派生 — 精确拉这 {len(rows)} 个 upstream 节点，不多不少
-  cnqq-residential:
-    type: http
-    url: "http://sub-store:3001{backend}/download/aggregated-residential?target=ClashMeta"
-    interval: 30
-    path: ./data/providers/cnqq-residential.yaml
-    filter: '{filter_regex_yaml}'
-    health-check:
-      enable: true
-      url: http://cp.cloudflare.com/generate_204
-      interval: 300
-
-  user-landing:
+  vps-chain-upstreams:
     type: http
     url: "http://sub-store:3001{backend}/download/collection/user-landing-airports?target=ClashMeta"
     interval: 30
-    path: ./data/providers/user-landing.yaml
+    path: ./data/providers/vps-chain-upstreams.yaml
+    filter: '{filter_regex_yaml}'
     health-check:
       enable: true
       url: http://cp.cloudflare.com/generate_204
@@ -177,8 +166,7 @@ proxy-groups:
   - name: "🏡 家宽-自动"
     type: url-test
     use:
-      - cnqq-residential
-      - user-landing
+      - vps-chain-upstreams
     url: http://cp.cloudflare.com/generate_204
     interval: 300
     tolerance: 50
@@ -221,7 +209,7 @@ def gen_vmess_bundle(rows, secrets, out_path):
     for r in rows:
         d = {
             "v": "2",
-            "ps": f"\U0001F3E1 链式 {r['display']} 家宽",  # 🏡 链式 ... 家宽
+            "ps": r["display"],
             "add": host,
             "port": "443",
             "id": uuid,

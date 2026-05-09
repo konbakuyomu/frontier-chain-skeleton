@@ -43,13 +43,15 @@ const DEFAULT_TIMEOUT_RESIDENTIAL_NAMES = [
 ];
 const FLAG_PREFIX_PATTERN = /^(?:\uD83C[\uDDE6-\uDDFF]){2}\s*/;
 const DEFAULT_SOURCE_PREFIX_MAP = {
-  ccrui: 'CCR',
-  ccr: 'CCR',
-  kuma: 'KUMA',
-  agg: 'AGG',
-  aggregated: 'AGG',
-  'aggregated-residential': 'AGG',
-  residential: 'AGG',
+  ccrui: 'L1-CCR',
+  ccr: 'L1-CCR',
+  kuma: 'L1-KUMA',
+  bwh: 'L2-BWH',
+  bandwagonhost: 'L2-BWH',
+  agg: 'L1-AGG',
+  aggregated: 'L1-AGG',
+  'aggregated-residential': 'L1-AGG',
+  residential: 'L1-AGG',
 };
 const SOURCE_PREFIX_FIELDS = [
   '__sourcePrefix',
@@ -345,7 +347,9 @@ function normalizeSourcePrefixValue(value, map) {
   if (value == null) return '';
   var text = String(value).trim();
   if (!text) return '';
-  if (/^(CCR|KUMA|AGG)$/i.test(text)) return text.toUpperCase();
+  if (/^L[0-9]+(?:-[A-Z0-9]+)*$/i.test(text)) return text.toUpperCase();
+  if (/^(CCR|KUMA|AGG)$/i.test(text)) return 'L1-' + text.toUpperCase();
+  if (/^BWH$/i.test(text)) return 'L2-BWH';
   var lower = text.toLowerCase();
   for (var key in map) {
     if (Object.prototype.hasOwnProperty.call(map, key) && lower.indexOf(key) !== -1) {
@@ -365,6 +369,15 @@ function detectSourcePrefix(proxy) {
     }
   }
   return '';
+}
+
+function isRoutePrefixedName(name) {
+  return /^L[0-9]+(?:-[A-Z0-9]+)*\s*\|/.test(String(name || ''));
+}
+
+function routePrefixForNode(sourcePrefix, normalizedBody) {
+  if (sourcePrefix !== 'L2-BWH') return sourcePrefix;
+  return hasResidentialTag(normalizedBody) ? 'L2-BWH-VIRCS' : 'L2-BWH';
 }
 
 function removeSourceMarkers(proxy) {
@@ -438,6 +451,7 @@ function normalizeAirportNodeName(name, proxy) {
   if (!name || INFO_PSEUDO_NODE_NAME_PATTERN.test(name)) {
     return name;
   }
+  if (isRoutePrefixedName(name)) return name;
 
   const region = detectExitRegion(name);
   const sourcePrefix = detectSourcePrefix(proxy);
@@ -457,6 +471,9 @@ function normalizeAirportNodeName(name, proxy) {
   );
   if (originalIsResidential && !hasResidentialTag(normalized)) {
     normalized = normalized + '-家宽';
+  }
+  if (sourcePrefix === 'L2-BWH') {
+    normalized = normalized.replace(/^L2-BWH\s*\|/, routePrefixForNode(sourcePrefix, normalized) + ' |');
   }
   return normalized;
 }
