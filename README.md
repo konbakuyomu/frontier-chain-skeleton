@@ -124,6 +124,8 @@ Shadowrocket 仍使用双订阅：
 https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowrocket.conf
 ```
 
+同理，`shadowrocket.conf` 内部不要再引用本仓库的 `@main` 资源。少量自有规则（例如 AI 扩展域名）直接内联在配置里；Sub-Store 节点清洗脚本用 commit-pinned URL 下载后以内联 Script Operator 形式保存到 Sub-Store。
+
 ## 已退役内容
 
 - 不再生成 `🏠 [VPS->家宽] Frontier`。

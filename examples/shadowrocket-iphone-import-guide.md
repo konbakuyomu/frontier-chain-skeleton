@@ -23,11 +23,10 @@
 
 ```bash
 curl -sI https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowrocket.conf | head -1
-curl -sI https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/ai-extensions.list | head -1
 curl -sI https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowrocket-nodes-injector.js | head -1
 ```
 
-三条均应返回 `HTTP/2 200`。不要用 `@main/shadowrocket.conf` 做正式配置订阅；branch ref 会被 CDN/客户端缓存。
+两条均应返回 `HTTP/2 200`。不要用 `@main/shadowrocket.conf` 做正式配置订阅；branch ref 会被 CDN/客户端缓存。
 
 ---
 
@@ -128,8 +127,8 @@ Shadowrocket → 首页 → 配置使用中 → 应能看到自动建立的策�
 | Safari 打开 https://ip.sb，临时切到 `马来西亚节点` 中的 Evoxt HY2 | 显示 Evoxt 出口 | 节点未导入 / Hiddify 上游异常 |
 | Safari 打开 https://claude.ai，看 Shadowrocket 流量页 | `claude.ai` 命中 `🤖 AI 服务` 组 → 出口家宽 | LingJingMaster AI.list URL 失效 (查 4.1) |
 | Safari 打开 https://chatgpt.com | 同上 (走 AI 组 → 家宽) | 同上 |
-| Safari 打开 https://gemini.google.com | 走 `🤖 AI 服务` 组 (注意: **不是** `🔍 谷歌服务`) | `ai-extensions.list` 排序未在 Google.list 之前 (查 4.2) |
-| Codex CLI: `cloudaicompanion.googleapis.com` / `cloudcode-pa.googleapis.com` | 走 `🤖 AI 服务` 组 → 家宽 | `ai-extensions.list` 缺 cloudcode-pa / cloudaicompanion 域 |
+| Safari 打开 https://gemini.google.com | 走 `🤖 AI 服务` 组 (注意: **不是** `🔍 谷歌服务`) | 自有 AI 扩展规则未在 Google.list 之前内联 (查 4.2) |
+| Codex CLI: `cloudaicompanion.googleapis.com` / `cloudcode-pa.googleapis.com` | 走 `🤖 AI 服务` 组 → 家宽 | 自有 AI 扩展规则缺 cloudcode-pa / cloudaicompanion 域 |
 | Safari 打开 https://baidu.com | 走 `DIRECT` (无延迟) | China.list URL 失效 |
 | Safari 打开 https://browserleaks.com/dns | 不见 doh.pub / alidns.com / 国内 ISP DNS | 配置 `dns-server` 字段被覆盖 |
 
@@ -142,9 +141,9 @@ curl -sI https://raw.githubusercontent.com/LingJingMaster/Shadowrocket-Rules/ref
 
 GitHub raw 偶发被墙时，临时把 URL 改 `https://cdn.jsdelivr.net/gh/LingJingMaster/Shadowrocket-Rules@main/AI.list` 形式（jsdelivr 反代）。
 
-### 4.2 ai-extensions.list 排序检查
+### 4.2 自有 AI 扩展规则排序检查
 
-打开 `shadowrocket.conf` → `[Rule]` 段。第 1 条 RULE-SET **必须**是 `ai-extensions.list`，第 4 条才是 LingJingMaster `Google.list`。如顺序反了，Gemini 会先命中 Google 组（走日本节点）而**不是** AI 组（走家宽）。
+打开 `shadowrocket.conf` → `[Rule]` 段。自有 AI 扩展规则必须内联在 LingJingMaster `Google.list` 之前。重点确认 `gemini.google.com`、`cloudcode-pa.googleapis.com`、`cloudaicompanion.googleapis.com` 都先命中 `🤖 AI 服务`。如顺序反了，Gemini 会先命中 Google 组（走日本节点）而**不是** AI 组（走家宽）。
 
 ---
 
@@ -196,7 +195,6 @@ Shadowrocket → 首页 → 订阅 → 编辑 → 自动更新间隔。
 | 用途 | URL |
 |---|---|
 | 配置订阅 | `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowrocket.conf` |
-| AI 扩展规则 | `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/ai-extensions.list` |
-| 节点注入脚本 | `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@main/shadowrocket-nodes-injector.js` |
+| 节点注入脚本 | `https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowrocket-nodes-injector.js` |
 | 上游 LingJingMaster | https://github.com/LingJingMaster/Shadowrocket-Rules |
 | 上游 blackmatrix7 | https://github.com/blackmatrix7/ios_rule_script |

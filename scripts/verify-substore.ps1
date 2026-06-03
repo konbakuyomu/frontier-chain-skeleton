@@ -91,8 +91,11 @@ if ($py) {
 }
 
 $srText = Get-Content -LiteralPath $ShadowrocketConfig -Raw -Encoding UTF8
-if ($srText -match 'frontier-chain-skeleton@main/shadowrocket\.conf') {
-  throw 'shadowrocket.conf must not reference @main for its config subscription; use commit-pinned jsDelivr URL'
+if ($srText -match 'frontier-chain-skeleton@main') {
+  throw 'shadowrocket.conf must not reference frontier-chain-skeleton@main; use commit-pinned jsDelivr URLs or inline own rules'
+}
+if ($srText -match 'ai-extensions\.list') {
+  throw 'shadowrocket.conf must inline own AI extension rules instead of loading ai-extensions.list through a cached branch URL'
 }
 if ($srText -notmatch '马来西亚节点\s*=') {
   throw 'shadowrocket.conf missing Malaysia region group'
@@ -102,6 +105,9 @@ if ($srText -notmatch '🚀 节点选择[^\r\n]*马来西亚节点') {
 }
 if ($srText -notmatch '🏡 家宽选择[^\r\n]*🏡 美国家宽' -or $srText -notmatch '🏡 家宽选择[^\r\n]*🏡 亚太家宽') {
   throw 'shadowrocket.conf residential selector missing US/APAC residential shortcuts'
+}
+if ($srText -notmatch 'DOMAIN,cloudcode-pa\.googleapis\.com,🤖 AI 服务' -or $srText -notmatch 'DOMAIN,cloudaicompanion\.googleapis\.com,🤖 AI 服务') {
+  throw 'shadowrocket.conf missing inline Codex/Gemini AI extension rules'
 }
 Write-Ok 'shadowrocket.conf local checks passed'
 
