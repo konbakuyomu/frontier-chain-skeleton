@@ -265,6 +265,40 @@ def analyze_uri_output(text):
     return quality
 
 
+def analyze_ios_hy2_shadowrocket_output(text):
+    try:
+        data = yaml_safe_load(text)
+    except Exception:
+        data = {}
+    proxies = data.get("proxies", []) if isinstance(data, dict) else []
+    names = [
+        str(proxy.get("name") or "")
+        for proxy in proxies
+        if isinstance(proxy, dict)
+    ]
+    types = [
+        str(proxy.get("type") or "").lower()
+        for proxy in proxies
+        if isinstance(proxy, dict)
+    ]
+    return {
+        "bytes": len(text.encode("utf-8")),
+        "proxy_count": len(proxies),
+        "evoxt_count": sum(1 for name in names if "L1-EVOXT" in name),
+        "hysteria2_count": sum(1 for proxy_type in types if proxy_type == "hysteria2"),
+        "has_yaml_shape": text.lstrip().startswith("proxies:"),
+        "forbidden_counts": forbidden_counts(text),
+    }
+
+
+def yaml_safe_load(text):
+    try:
+        import yaml
+    except Exception as exc:
+        raise RuntimeError("PyYAML unavailable: " + str(exc))
+    return yaml.safe_load(text)
+
+
 def profile_check(text):
     checker = None
     for candidate in ("mihomo", "clash"):
@@ -604,6 +638,24 @@ def main():
                 checks.append(ok("ClashMeta and URI names match", same_names(clash_names, uri_names), "clash=%s uri=%s" % (len(clash_names), len(uri_names))))
             except Exception as exc:
                 checks.append(warn("URI collection fetch skipped", str(exc)))
+            try:
+                ios_uri = fetch_local(backend_path, "/download/collection/ios-airports-uri?target=URI")
+                http["ios_airports_uri"] = analyze_uri_output(ios_uri)
+                ios_uri_schemes = http["ios_airports_uri"]["scheme_counts"]
+                checks.append(ok("iOS airports URI collection is line-based", not http["ios_airports_uri"]["has_yaml_shape"], safe_detail_dict(ios_uri_schemes)))
+                checks.append(ok("iOS airports URI excludes Evoxt", "L1-EVOXT" not in ios_uri, str(ios_uri.count("L1-EVOXT"))))
+                checks.append(ok("iOS airports URI has ordinary nodes", http["ios_airports_uri"]["line_count"] >= 200, str(http["ios_airports_uri"]["line_count"])))
+                checks.append(ok("iOS airports URI keeps residential candidates", http["ios_airports_uri"]["residential_candidate_count"] > 0, str(http["ios_airports_uri"]["residential_candidate_count"])))
+            except Exception as exc:
+                checks.append(warn("iOS airports URI collection fetch skipped", str(exc)))
+            try:
+                ios_hy2 = fetch_local(backend_path, "/download/collection/ios-evoxt-hy2-shadowrocket?target=ShadowRocket")
+                http["ios_evoxt_hy2_shadowrocket"] = analyze_ios_hy2_shadowrocket_output(ios_hy2)
+                checks.append(ok("iOS Evoxt HY2 collection is YAML for Shadowrocket", http["ios_evoxt_hy2_shadowrocket"]["has_yaml_shape"]))
+                checks.append(ok("iOS Evoxt HY2 collection has exactly three Evoxt nodes", http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"] == 3, str(http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"])))
+                checks.append(ok("iOS Evoxt HY2 collection only has hysteria2 nodes", http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"] == 3 and http["ios_evoxt_hy2_shadowrocket"]["proxy_count"] == 3, "hy2=%s total=%s" % (http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"], http["ios_evoxt_hy2_shadowrocket"]["proxy_count"])))
+            except Exception as exc:
+                checks.append(warn("iOS Evoxt HY2 collection fetch skipped", str(exc)))
             try:
                 final = fetch_local(backend_path, "/api/file/%s?target=mihomo" % args.file)
                 http["final_mihomo"] = analyze_mihomo_output(final)

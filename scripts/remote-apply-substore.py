@@ -8,9 +8,11 @@ preserves existing tokens plus unrelated upstream subscription URLs.
 """
 
 import argparse
+import copy
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import stat
 import subprocess
@@ -25,6 +27,10 @@ DEFAULT_AGGREGATOR_DISPLAY_NAME = "家宽聚合订阅"
 DEFAULT_AGGREGATOR_SOURCE_PREFIX = "AGG"
 DEFAULT_MIHOMO_DISPLAY_NAME = "家宽选择层 mihomo 配置"
 DEFAULT_MIHOMO_CONTENT_PLACEHOLDER = "# Sub-Store mihomoProfile placeholder\n"
+IOS_AIRPORTS_COLLECTION = "ios-airports-uri"
+IOS_AIRPORTS_DISPLAY_NAME = "iOS Shadowrocket 节点订阅 - 普通机场与家宽 URI"
+IOS_EVOXT_HY2_COLLECTION = "ios-evoxt-hy2-shadowrocket"
+IOS_EVOXT_HY2_DISPLAY_NAME = "iOS Shadowrocket 节点订阅 - Evoxt HY2"
 
 
 def read_text(path):
@@ -234,6 +240,94 @@ def ensure_residential_subscription(
     return changed
 
 
+def ensure_collection_variant(data, source_collection_name, name, display_name, subscriptions, remark):
+    source = find_named(data.get("collections", []), source_collection_name)
+    if not source:
+        raise RuntimeError("missing collection: " + source_collection_name)
+    collections = data.setdefault("collections", [])
+    item = find_named(collections, name)
+    changed = []
+    if item is None:
+        item = copy.deepcopy(source)
+        item["name"] = name
+        collections.append(item)
+        changed.append("collection-created:" + name)
+    for key, value in (
+        ("displayName", display_name),
+        ("display-name", display_name),
+        ("subscriptions", subscriptions),
+        ("remark", remark),
+        ("firstSubFlow", True),
+    ):
+        if item.get(key) != value:
+            item[key] = value
+            changed.append("collection-updated:" + name + ":" + key)
+    item.setdefault("tag", [])
+    item.setdefault("subscriptionTags", [])
+    return changed
+
+
+def ensure_collection_share_token(data, name, display_name):
+    tokens = data.setdefault("tokens", [])
+    item = None
+    for token in tokens:
+        if isinstance(token, dict) and token.get("type") == "col" and token.get("name") == name:
+            item = token
+            break
+    changed = []
+    if item is None:
+        now = int(time.time() * 1000)
+        item = {
+            "type": "col",
+            "name": name,
+            "displayName": display_name,
+            "remark": "",
+            "tag": [],
+            "token": secrets.token_urlsafe(18),
+            "createdAt": now,
+            "mode": "duration",
+            "expiresIn": "1095d",
+            "exp": now + 1095 * 24 * 60 * 60 * 1000,
+        }
+        tokens.append(item)
+        changed.append("token-created:" + name)
+    else:
+        if item.get("displayName") != display_name:
+            item["displayName"] = display_name
+            changed.append("token-display-updated:" + name)
+        if not item.get("token"):
+            item["token"] = secrets.token_urlsafe(18)
+            changed.append("token-created:" + name)
+        item.setdefault("mode", "duration")
+        item.setdefault("expiresIn", "1095d")
+        item.setdefault("tag", [])
+        item.setdefault("remark", "")
+    return changed
+
+
+def ensure_ios_shadowrocket_collections(data, source_collection_name, evoxt_subscription_name):
+    changed = []
+    changed += ensure_collection_variant(
+        data,
+        source_collection_name,
+        IOS_AIRPORTS_COLLECTION,
+        IOS_AIRPORTS_DISPLAY_NAME,
+        ["ccrui", "kuma", DEFAULT_AGGREGATOR_NAME],
+        "iPhone Shadowrocket 普通机场/家宽节点订阅；使用 target=URI，避免 target=ShadowRocket YAML 兼容问题。",
+    )
+    changed += ensure_collection_variant(
+        data,
+        source_collection_name,
+        IOS_EVOXT_HY2_COLLECTION,
+        IOS_EVOXT_HY2_DISPLAY_NAME,
+        [evoxt_subscription_name],
+        "iPhone Shadowrocket Evoxt HY2 专用节点订阅；使用 target=ShadowRocket，保留实机可测速的 HY2 YAML 形态。",
+    )
+    changed += ensure_collection_share_token(data, IOS_AIRPORTS_COLLECTION, "iOS节点-普通机场家宽-URI")
+    changed += ensure_collection_share_token(data, IOS_EVOXT_HY2_COLLECTION, "iOS节点-Evoxt-HY2-ShadowRocket")
+    return changed
+
+
 def install_powerfullz_updater(src, app_dir):
     dst = Path(app_dir) / "update-powerfullz-inline.py"
     old = dst.read_text(encoding="utf-8") if dst.exists() else ""
@@ -331,6 +425,12 @@ def main():
             "bytes": len(content.encode("utf-8")),
             "sha256": short_hash(content),
         })
+
+    ios_names = ensure_ios_shadowrocket_collections(data, args.collection, "substore-evoxt-upstream")
+    changes.append({
+        "target": "ios-shadowrocket-collections",
+        "changed": ios_names,
+    })
 
     if args.mihomo_main:
         content = read_text(args.mihomo_main)

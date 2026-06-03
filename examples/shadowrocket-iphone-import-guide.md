@@ -59,13 +59,26 @@ https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowr
 
 ### 2.4 拼节点订阅 URL
 
-直接使用 Collection 下载 URL：
+普通机场/家宽节点订阅使用 iOS 专用 Collection：
 
 ```
-https://<sub-store-host>/<api-prefix>/download/collection/merged-airports?target=URI
+https://<sub-store-host>/<api-prefix>/download/collection/ios-airports-uri?target=URI
 ```
 
-不要在 iPhone 订阅 URL 后追加凭据 fragment。不要用 `target=ShadowRocket` 做正式 iPhone 节点订阅；当前 Sub-Store 会返回 `proxies:` YAML，Shadowrocket 容易出现蓝色通用图标、测速不可用等兼容问题。
+Evoxt HY2 节点订阅使用另一条 iOS 专用 Collection：
+
+```
+https://<sub-store-host>/<api-prefix>/download/collection/ios-evoxt-hy2-shadowrocket?target=ShadowRocket
+```
+
+如果从 Sub-Store `/shares` 页面复制分享入口，形态会是 `/share/col/<name>?token=<TOKEN>`。这时按 Collection 分别追加 target：
+
+```text
+.../share/col/ios-airports-uri?token=<TOKEN>&target=URI
+.../share/col/ios-evoxt-hy2-shadowrocket?token=<TOKEN>&target=ShadowRocket
+```
+
+不要在 iPhone 订阅 URL 后追加凭据 fragment。不要把普通机场/家宽和 Evoxt HY2 合在同一条 iPhone 节点订阅里：普通节点在 `target=ShadowRocket` 下容易出现蓝色通用图标、测速不可用；Evoxt HY2 在 `target=URI` 下又会出现同类问题。
 
 ### 2.5 后台预览验证
 
