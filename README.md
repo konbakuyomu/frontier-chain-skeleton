@@ -11,7 +11,7 @@ VPS/Sub-Store 三端订阅中心的公开源码层。当前生产主链是：
 
 Shadowrocket(iOS)
   -> shadowrocket.conf 配置订阅
-  -> merged-airports?target=ShadowRocket 节点订阅
+  -> merged-airports?target=URI 节点订阅
 ```
 
 核心边界：业务组只认识稳定的 `🏡 家宽选择`，不再引用 Frontier、ScrapeGW、VPS 链式节点、区域家宽组或任何具体供应商节点名。
@@ -104,7 +104,7 @@ Remove-Item Env:\FRONTIER_RESIDENTIAL_AGGREGATOR_URL
 
 - `docker logs sub-store --tail 200` 无 `missing` / `error` / `fail` / `exception`。
 - `merged-airports` 同时包含 `ccrui`、`kuma`、`aggregated-residential`。
-- `?target=ClashMeta` 与 `?target=ShadowRocket` 的节点 name 列表一致。
+- `?target=ClashMeta` 与 `?target=URI` 的节点 name 列表一致。
 - 输出中没有 `[VPS->家宽]`、`[机场->家宽]`、`Frontier`、`ScrapeGW`。
 - 输出中没有伪节点、不可直连提示节点、已知超时家宽节点。
 - final mihomo YAML 含 `🏡 家宽选择`，且 profile-check 通过。
@@ -114,7 +114,9 @@ Remove-Item Env:\FRONTIER_RESIDENTIAL_AGGREGATOR_URL
 Shadowrocket 仍使用双订阅：
 
 1. 配置订阅：`shadowrocket.conf` 的 commit-pinned jsDelivr URL。
-2. 节点订阅：VPS/Sub-Store 的 `merged-airports?target=ShadowRocket`。
+2. 节点订阅：VPS/Sub-Store 的 `merged-airports?target=URI`。
+
+当前 Sub-Store 的 `target=ShadowRocket` 会输出 `proxies:` YAML。Shadowrocket 虽然可能部分识别，但会出现通用蓝色图标、测速异常等兼容问题。iPhone 正式节点订阅使用 `target=URI`，它输出一行一个原生节点 URI，节点名集合与 `ClashMeta` 一致。
 
 `shadowrocket.conf` 中的 `🏡 家宽选择` 是手动 selector。用户在这个 selector 内选择具体家宽节点；AI / PayPal 等业务组保持选中 `🏡 家宽选择` 即可。
 

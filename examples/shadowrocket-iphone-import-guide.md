@@ -62,10 +62,10 @@ https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowr
 直接使用 Collection 下载 URL：
 
 ```
-https://<sub-store-host>/<api-prefix>/download/collection/merged-airports?target=ShadowRocket
+https://<sub-store-host>/<api-prefix>/download/collection/merged-airports?target=URI
 ```
 
-不要在 iPhone 订阅 URL 后追加凭据 fragment。
+不要在 iPhone 订阅 URL 后追加凭据 fragment。不要用 `target=ShadowRocket` 做正式 iPhone 节点订阅；当前 Sub-Store 会返回 `proxies:` YAML，Shadowrocket 容易出现蓝色通用图标、测速不可用等兼容问题。
 
 ### 2.5 后台预览验证
 

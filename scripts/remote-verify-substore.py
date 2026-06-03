@@ -242,6 +242,29 @@ def analyze_collection_output(text):
     return quality
 
 
+def analyze_uri_output(text):
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    scheme_counts = {}
+    for line in lines:
+        match = re.match(r"^([A-Za-z0-9+.-]+)://", line)
+        scheme = match.group(1).lower() if match else "non-uri"
+        scheme_counts[scheme] = scheme_counts.get(scheme, 0) + 1
+    names = extract_proxy_names(text)
+    quality = name_quality(names)
+    quality.update({
+        "bytes": len(text.encode("utf-8")),
+        "line_count": len(lines),
+        "scheme_counts": scheme_counts,
+        "has_yaml_shape": any(line == "proxies:" or line.startswith("- {") for line in lines[:5]),
+        "forbidden_counts": forbidden_counts(text),
+    })
+    return quality
+
+
 def profile_check(text):
     checker = None
     for candidate in ("mihomo", "clash"):
@@ -538,6 +561,7 @@ def main():
     http = {}
     clash_names = []
     shadow_names = []
+    uri_names = []
     if not args.skip_http:
         backend_path = read_backend_path(args.app_dir, args.container)
         if backend_path:
@@ -568,6 +592,18 @@ def main():
                 checks.append(warn("collection target name equality skipped", "clash=%s shadow=%s" % (len(clash_names), len(shadow_names))))
             else:
                 checks.append(ok("ClashMeta and ShadowRocket names match", equal_names, "clash=%s shadow=%s" % (len(clash_names), len(shadow_names))))
+            try:
+                uri = fetch_local(backend_path, "/download/collection/%s?target=URI" % args.collection)
+                http["collection_uri"] = analyze_uri_output(uri)
+                uri_names = extract_proxy_names(uri)
+                uri_schemes = http["collection_uri"]["scheme_counts"]
+                checks.append(ok("URI collection is line-based, not YAML", not http["collection_uri"]["has_yaml_shape"], safe_detail_dict(uri_schemes)))
+                checks.append(ok("URI collection has no retired link names", not http["collection_uri"]["forbidden_counts"], safe_detail_dict(http["collection_uri"]["forbidden_counts"])))
+                checks.append(ok("URI collection has residential candidates", http["collection_uri"]["residential_candidate_count"] > 0, str(http["collection_uri"]["residential_candidate_count"])))
+                checks.append(ok("URI collection exposes expected schemes", sum(uri_schemes.get(s, 0) for s in ("ss", "vmess", "vless", "trojan", "hysteria2")) == http["collection_uri"]["line_count"], safe_detail_dict(uri_schemes)))
+                checks.append(ok("ClashMeta and URI names match", same_names(clash_names, uri_names), "clash=%s uri=%s" % (len(clash_names), len(uri_names))))
+            except Exception as exc:
+                checks.append(warn("URI collection fetch skipped", str(exc)))
             try:
                 final = fetch_local(backend_path, "/api/file/%s?target=mihomo" % args.file)
                 http["final_mihomo"] = analyze_mihomo_output(final)
