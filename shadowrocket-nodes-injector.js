@@ -485,9 +485,22 @@ function buildUnifiedName(sourcePrefix, regionName, provider, routeTag, rateLabe
   return sourcePrefix ? sourcePrefix + ' | ' + body : body;
 }
 
+function isPreservedMineHy2NodeName(name) {
+  return (
+    typeof name === 'string' &&
+    /MINE/.test(name) &&
+    /动态ISP/.test(name) &&
+    /HY2/i.test(name) &&
+    /家宽/.test(name)
+  );
+}
+
 function normalizeAirportNodeName(name, proxy) {
   if (!name || INFO_PSEUDO_NODE_NAME_PATTERN.test(name)) {
     return name;
+  }
+  if (isPreservedMineHy2NodeName(name)) {
+    return '马来西亚-MINE 动态ISP-家宽-HY2链式';
   }
   const sourcePrefix = detectSourcePrefix(proxy);
   if (isEvoxtNode(sourcePrefix, name) && isHysteria2Proxy(proxy, name)) {
