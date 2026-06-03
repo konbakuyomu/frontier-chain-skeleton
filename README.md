@@ -113,10 +113,16 @@ Remove-Item Env:\FRONTIER_RESIDENTIAL_AGGREGATOR_URL
 
 Shadowrocket 仍使用双订阅：
 
-1. 配置订阅：`shadowrocket.conf` 的 jsdelivr URL。
+1. 配置订阅：`shadowrocket.conf` 的 commit-pinned jsDelivr URL。
 2. 节点订阅：VPS/Sub-Store 的 `merged-airports?target=ShadowRocket`。
 
 `shadowrocket.conf` 中的 `🏡 家宽选择` 是手动 selector。用户在这个 selector 内选择具体家宽节点；AI / PayPal 等业务组保持选中 `🏡 家宽选择` 即可。
+
+不要把 jsDelivr 的 `@main/shadowrocket.conf` branch ref 作为 iPhone 长期配置订阅。jsDelivr 对 branch ref 有缓存，Shadowrocket 也可能保留旧配置；正式发布后使用：
+
+```text
+https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowrocket.conf
+```
 
 ## 已退役内容
 

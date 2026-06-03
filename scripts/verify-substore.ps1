@@ -39,6 +39,7 @@ $JsFiles = @(
   (Join-Path $RepoRoot 'shadowrocket-nodes-injector.js'),
   (Join-Path $RepoRoot 'main.js')
 )
+$ShadowrocketConfig = Join-Path $RepoRoot 'shadowrocket.conf'
 $PyFiles = @(
   (Join-Path $PSScriptRoot 'remote-verify-substore.py'),
   (Join-Path $PSScriptRoot 'remote-apply-substore.py'),
@@ -88,6 +89,21 @@ if ($py) {
 } else {
   Write-Warn2 'python not found locally, skipped Python syntax checks'
 }
+
+$srText = Get-Content -LiteralPath $ShadowrocketConfig -Raw -Encoding UTF8
+if ($srText -match 'frontier-chain-skeleton@main/shadowrocket\.conf') {
+  throw 'shadowrocket.conf must not reference @main for its config subscription; use commit-pinned jsDelivr URL'
+}
+if ($srText -notmatch '马来西亚节点\s*=') {
+  throw 'shadowrocket.conf missing Malaysia region group'
+}
+if ($srText -notmatch '🚀 节点选择[^\r\n]*马来西亚节点') {
+  throw 'shadowrocket.conf primary selector does not expose Malaysia region group'
+}
+if ($srText -notmatch '🏡 家宽选择[^\r\n]*🏡 美国家宽' -or $srText -notmatch '🏡 家宽选择[^\r\n]*🏡 亚太家宽') {
+  throw 'shadowrocket.conf residential selector missing US/APAC residential shortcuts'
+}
+Write-Ok 'shadowrocket.conf local checks passed'
 
 if ($SkipRemote) {
   Write-Warn2 'remote checks skipped by -SkipRemote'

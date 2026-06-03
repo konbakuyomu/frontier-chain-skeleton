@@ -375,6 +375,44 @@ function isRoutePrefixedName(name) {
   return /^L[0-9]+(?:-[A-Z0-9]+)*\s*\|/.test(String(name || ''));
 }
 
+function isEvoxtNodeName(name) {
+  return /^L1-EVOXT\s*\|/.test(String(name || ''));
+}
+
+function isEvoxtNode(sourcePrefix, name) {
+  return sourcePrefix === 'L1-EVOXT' || isEvoxtNodeName(name);
+}
+
+function isHysteria2Proxy(proxy, name) {
+  var type = String((proxy && proxy.type) || '').toLowerCase();
+  return type === 'hysteria2' || /hysteria\s*2|hy2/i.test(String(name || ''));
+}
+
+function extractEvoxtHy2Port(name, proxy) {
+  var port = proxy && proxy.port != null ? String(proxy.port).trim() : '';
+  if (/^\d{2,5}$/.test(port)) return port;
+  var match = String(name || '').match(/(?:§|\bport\b|:|\s)(\d{4,5})(?:\D|$)/i);
+  return match ? match[1] : '';
+}
+
+function evoxtEntryKind(name, proxy) {
+  var text = String((proxy && proxy.server) || name || '');
+  if (/sslip\.io/i.test(text)) return 'SSLIP';
+  if (/hiddify|konbakuyomu/i.test(text)) return '域名';
+  if (/(?:^|[^\d])(?:\d{1,3}\.){3}\d{1,3}(?:$|[^\d])/.test(text)) return 'IPv4';
+  return '入口';
+}
+
+function buildEvoxtHysteria2Name(name, proxy, sourcePrefix) {
+  var prefix = sourcePrefix || 'L1-EVOXT';
+  var kind = evoxtEntryKind(name, proxy);
+  var port = extractEvoxtHy2Port(name, proxy);
+  var parts = ['马来西亚', 'HY2'];
+  if (kind) parts.push(kind);
+  if (port) parts.push(port);
+  return prefix + ' | ' + parts.join('-');
+}
+
 function routePrefixForNode(sourcePrefix, normalizedBody) {
   if (sourcePrefix !== 'L2-BWH') return sourcePrefix;
   return hasResidentialTag(normalizedBody) ? 'L2-BWH-VIRCS' : 'L2-BWH';
@@ -451,10 +489,13 @@ function normalizeAirportNodeName(name, proxy) {
   if (!name || INFO_PSEUDO_NODE_NAME_PATTERN.test(name)) {
     return name;
   }
+  const sourcePrefix = detectSourcePrefix(proxy);
+  if (isEvoxtNode(sourcePrefix, name) && isHysteria2Proxy(proxy, name)) {
+    return buildEvoxtHysteria2Name(name, proxy, sourcePrefix || 'L1-EVOXT');
+  }
   if (isRoutePrefixedName(name)) return name;
 
   const region = detectExitRegion(name);
-  const sourcePrefix = detectSourcePrefix(proxy);
   if (!region && !sourcePrefix) return name;
 
   const originalIsResidential = hasResidentialTag(name);
@@ -501,6 +542,27 @@ function isTimeoutResidentialNode(proxy, timeoutNames) {
   );
 }
 
+function isUnsupportedEvoxtVlessNode(proxy, normalizedName, sourcePrefix) {
+  var name = String(normalizedName || (proxy && proxy.name) || '');
+  var type = String((proxy && proxy.type) || '').toLowerCase();
+  if (!isEvoxtNode(sourcePrefix, name)) return false;
+
+  // Current Hiddify Evoxt VLESS candidates are not part of the formal profile:
+  // Reality fails auth in Mihomo, and the TLS/TCP fallback fails live delay.
+  return type === 'vless';
+}
+
+function normalizeEvoxtHysteria2Node(proxy, normalizedName, sourcePrefix) {
+  var name = String(normalizedName || (proxy && proxy.name) || '');
+  var type = String((proxy && proxy.type) || '').toLowerCase();
+  if (!isEvoxtNode(sourcePrefix, name) || type !== 'hysteria2') return;
+
+  // Hiddify's native ClashMeta export omits SNI for these HY2 nodes. Keep the
+  // formal Sub-Store output as close to that source as possible for FlClash.
+  delete proxy.sni;
+  delete proxy.servername;
+}
+
 function normalizeAirportProxies(proxies) {
   if (!Array.isArray(proxies)) return proxies;
 
@@ -520,7 +582,10 @@ function normalizeAirportProxies(proxies) {
     if (isNonDirectProxy(proxy)) continue;
     if (isRetiredProviderProxy(proxy)) continue;
     if (isTimeoutResidentialNode(proxy, timeoutNames)) continue;
+    var sourcePrefix = detectSourcePrefix(proxy);
     var normalizedName = normalizeAirportNodeName(proxy.name, proxy);
+    if (isUnsupportedEvoxtVlessNode(proxy, normalizedName, sourcePrefix)) continue;
+    normalizeEvoxtHysteria2Node(proxy, normalizedName, sourcePrefix);
     if (RETIRED_PROVIDER_PATTERN.test(normalizedName)) continue;
     if (
       hasResidentialTag(normalizedName) &&

@@ -162,6 +162,24 @@ function prependUniqueRules(config, rules) {
   return uniqueRules;
 }
 
+function insertUniqueRulesBefore(config, rules, isAnchor) {
+  if (!Array.isArray(config.rules)) config.rules = [];
+  const existing = new Set(config.rules.map(rule => String(rule).trim()));
+  const uniqueRules = [];
+  for (const rule of rules) {
+    const key = String(rule).trim();
+    if (!key || existing.has(key)) continue;
+    existing.add(key);
+    uniqueRules.push(rule);
+  }
+  if (uniqueRules.length === 0) return uniqueRules;
+
+  const anchorIndex = config.rules.findIndex(rule => isAnchor(String(rule).trim()));
+  const insertAt = anchorIndex >= 0 ? anchorIndex : config.rules.length;
+  config.rules.splice(insertAt, 0, ...uniqueRules);
+  return uniqueRules;
+}
+
 // ------------------------------------------------------------
 // Shadowrocket 兼容：把 mihomo 的 `include-all: true` 组就地展开
 // 成节点名字数组，并删除 include-all / filter / exclude-filter 三个
@@ -461,6 +479,8 @@ function main(config) {
     // 注：组挂了大图标（icon 字段），组名故意不带 emoji 前缀
     // 详见 .trellis/spec/network/proxy-group-flexibility.md §5 图标 + 命名规则
     const paypalGroupName = "PayPal";
+    const selfDomainGroupName = "自有域名";
+    const SELF_DOMAIN_SUFFIXES = ["konbakuyomu.us"];
     const RESIDENTIAL_SELECTOR_NAME = "🏡 家宽选择";
 
     // Koolson/Qure 图标库 base（与 powerfullz 国家组同款，Sparkle UI 显示协调）
@@ -593,7 +613,7 @@ function main(config) {
         "include-all": true,
         filter,
         "exclude-filter": EXCLUDE_INFO_PATTERN,
-        url: "https://cp.cloudflare.com/generate_204",
+        url: "http://cp.cloudflare.com/generate_204",
         interval: 300,
         tolerance: 50,
         lazy: true,
@@ -680,6 +700,29 @@ function main(config) {
         icon: `${ICON_BASE}/PayPal.png`,
       });
     }
+
+    // 2a) upsert 自有域名选择组：默认直连，但 UI 里允许临时切到代理 / 家宽 / 拒绝。
+    const selfDomainProxies = uniqueProxyList([
+      "DIRECT",
+      selectGroup,
+      RESIDENTIAL_SELECTOR_NAME,
+      "REJECT",
+    ]);
+    const selfDomainGroup = pgList.find(g => g && g.name === selfDomainGroupName);
+    if (selfDomainGroup) {
+      selfDomainGroup.type = "select";
+      selfDomainGroup.proxies = selfDomainProxies;
+      selfDomainGroup.icon = `${ICON_BASE}/Direct.png`;
+    } else {
+      const paypalIdx = pgList.findIndex(g => g && g.name === paypalGroupName);
+      const insertAt = paypalIdx >= 0 ? paypalIdx + 1 : pgList.length;
+      pgList.splice(insertAt, 0, {
+        name: selfDomainGroupName,
+        type: "select",
+        proxies: selfDomainProxies,
+        icon: `${ICON_BASE}/Direct.png`,
+      });
+    }
     config["proxy-groups"] = pgList;
 
     // 2b) 把新组注入 GLOBAL.proxies — 关键步骤
@@ -695,8 +738,21 @@ function main(config) {
         globalGroup.proxies.splice(insertGlobalAt, 0, RESIDENTIAL_SELECTOR_NAME);
         insertGlobalAt += 1;
       }
+      // FlClash/Sparkle build the visible proxy tab from GLOBAL.all. Keep the
+      // shortcut groups visible there, while business groups still only point
+      // at the stable residential selector layer.
+      for (const name of residentialSelectorHead) {
+        if (!globalGroup.proxies.includes(name)) {
+          globalGroup.proxies.splice(insertGlobalAt, 0, name);
+          insertGlobalAt += 1;
+        }
+      }
       if (!globalGroup.proxies.includes(paypalGroupName)) {
         globalGroup.proxies.splice(insertGlobalAt, 0, paypalGroupName);
+        insertGlobalAt += 1;
+      }
+      if (!globalGroup.proxies.includes(selfDomainGroupName)) {
+        globalGroup.proxies.splice(insertGlobalAt, 0, selfDomainGroupName);
         insertGlobalAt += 1;
       }
     }
@@ -719,22 +775,43 @@ function main(config) {
     };
     config["rule-providers"] = { ...(config["rule-providers"] || {}), ...userProviders };
 
-    // 4) 用户规则：PayPal → 💵 PayPal 组（UI 可切），自有域 → DIRECT
+    // 4) 用户规则：自有域 → 自有域名组（默认直连、UI 可切），PayPal → PayPal 组
+    const selfDomainRules = SELF_DOMAIN_SUFFIXES.map(suffix =>
+      `DOMAIN-SUFFIX,${suffix},${selfDomainGroupName}`
+    );
+    const domesticDirectRules = [
+      "DOMAIN-SUFFIX,qq.com,DIRECT",
+      "DOMAIN-SUFFIX,weixin.qq.com,DIRECT",
+      "DOMAIN-SUFFIX,wechat.com,DIRECT",
+      "DOMAIN-SUFFIX,tencent.com,DIRECT",
+      "DOMAIN-SUFFIX,gtimg.com,DIRECT",
+      "DOMAIN-SUFFIX,gtimg.cn,DIRECT",
+      "DOMAIN-SUFFIX,qpic.cn,DIRECT",
+      "DOMAIN-SUFFIX,url.cn,DIRECT",
+      "GEOSITE,tencent,DIRECT",
+      "GEOSITE,geolocation-cn,DIRECT",
+      "GEOSITE,cn,DIRECT",
+    ];
     const userRules = [
+      ...selfDomainRules,
       `RULE-SET,paypal-meta,${paypalGroupName}`,
       `RULE-SET,paypal-cn-meta,${paypalGroupName}`,
       // 冷启动兜底：mrs 异步拉取完成前显式命中核心域
       `DOMAIN-SUFFIX,paypal.com,${paypalGroupName}`,
       `DOMAIN-SUFFIX,paypalobjects.com,${paypalGroupName}`,
       `DOMAIN-SUFFIX,paypal-objects.com,${paypalGroupName}`,
-      // 自有域 → 直连
-      `DOMAIN-SUFFIX,konbakuyomu.us,DIRECT`,
     ];
 
     if (Array.isArray(config.rules)) {
       validateRuleTargets(config, userRules);
       const insertedUserRules = prependUniqueRules(config, userRules);
-      logInfo(`用户自定义规则注入：${insertedUserRules.length} 条 → ${paypalGroupName}/DIRECT`);
+      validateRuleTargets(config, domesticDirectRules);
+      const insertedDomesticDirectRules = insertUniqueRulesBefore(
+        config,
+        domesticDirectRules,
+        rule => rule === "GEOIP,cn,DIRECT" || rule === "MATCH,Final" || rule.startsWith("MATCH,")
+      );
+      logInfo(`用户自定义规则注入：${insertedUserRules.length} 条 → ${selfDomainGroupName}/${paypalGroupName}；国内直连规则 ${insertedDomesticDirectRules.length} 条`);
     }
 
     // 5) 业务组镜像家宽选择层（spec §6.9）
@@ -750,6 +827,7 @@ function main(config) {
       "落地节点", "低倍率节点", "静态资源", "前置代理",
       "直连", "DIRECT", "REJECT",
       RESIDENTIAL_SELECTOR_NAME,
+      selfDomainGroupName,
       "广告拦截",  // spec §3 例外：拦截语义不需切代理
       // PayPal 不再排除：业务组镜像循环统一注入家宽选择层。
       // includes 检查保护去重（PayPal 头部已含 🏡 家宽选择 → 跳过）

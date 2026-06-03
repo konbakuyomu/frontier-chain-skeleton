@@ -301,7 +301,13 @@ def docker_log_issue_count(container):
         )
     except Exception as exc:
         return None, str(exc)
-    hits = re.findall(r"(?i)missing|error|fail|exception", out)
+    sanitized_lines = []
+    for line in out.splitlines():
+        if "Redirect loop detected" in line and "使用 HEAD 方法从响应头获取流量信息失败" in line:
+            continue
+        sanitized_lines.append(line)
+    sanitized = "\n".join(sanitized_lines)
+    hits = re.findall(r"(?i)missing|error|fail|exception", sanitized)
     return {
         "issue_count": len(hits),
         "bytes": len(out.encode("utf-8")),
@@ -310,28 +316,60 @@ def docker_log_issue_count(container):
 
 def analyze_mihomo_output(text):
     visible_text = normalize_visible_text(text)
+    proxies = section(text, "proxies")
     proxy_groups = section(text, "proxy-groups")
     visible_proxy_groups = section(visible_text, "proxy-groups")
     rules = section(text, "rules")
-    names = extract_proxy_names(section(text, "proxies"))
+    rule_items = extract_rules(rules)
+    names = extract_proxy_names(proxies)
+    evoxt_blocks = [block for block in extract_proxy_blocks(proxies) if "L1-EVOXT" in block]
     quality = name_quality(names)
     quality.update({
         "bytes": len(text.encode("utf-8")),
-        "has_proxies": bool(section(text, "proxies")),
+        "has_proxies": bool(proxies),
         "has_proxy_groups": bool(proxy_groups),
         "has_rules": bool(rules),
         "has_rule_providers": bool(section(text, "rule-providers")),
         "has_dns": bool(section(text, "dns")),
         "proxy_group_count": count_regex(proxy_groups, r"^\s*-\s*name\s*:"),
         "rule_count": count_regex(rules, r"^\s*-\s*"),
+        "evoxt_node_count": len(evoxt_blocks),
+        "evoxt_hysteria2_count": sum(1 for block in evoxt_blocks if proxy_block_type(block) == "hysteria2"),
+        "evoxt_hysteria2_sni_count": sum(1 for block in evoxt_blocks if proxy_block_type(block) == "hysteria2" and proxy_block_has_sni(block)),
+        "evoxt_vless_count": sum(1 for block in evoxt_blocks if proxy_block_type(block) == "vless"),
+        "evoxt_reality_count": sum(1 for block in evoxt_blocks if proxy_block_is_reality(block)),
+        "evoxt_malaysia_name_count": sum(1 for block in evoxt_blocks if "马来西亚" in block or "Malaysia" in block),
+        "has_evoxt_group": "name: Evoxt 自建" in visible_proxy_groups or "name: 'Evoxt 自建'" in visible_proxy_groups or "name: \"Evoxt 自建\"" in visible_proxy_groups,
+        "evoxt_group_refs": group_body_refs(visible_proxy_groups, "Evoxt 自建", "L1-EVOXT |"),
+        "evoxt_group_http_probe": group_body_refs(visible_proxy_groups, "Evoxt 自建", "http://cp.cloudflare.com/generate_204"),
+        "primary_group_evoxt_refs": group_body_refs(visible_proxy_groups, "选择代理", "Evoxt 自建"),
+        "global_evoxt_refs": group_body_refs(visible_proxy_groups, "GLOBAL", "Evoxt 自建"),
+        "malaysia_group_evoxt_refs": group_body_refs(visible_proxy_groups, "马来西亚节点", "L1-EVOXT |"),
+        "primary_group_malaysia_refs": group_body_refs(visible_proxy_groups, "选择代理", "马来西亚节点"),
+        "global_malaysia_refs": group_body_refs(visible_proxy_groups, "GLOBAL", "马来西亚节点"),
+        "global_us_residential_refs": group_body_refs(visible_proxy_groups, "GLOBAL", "🏡 美国家宽"),
+        "global_apac_residential_refs": group_body_refs(visible_proxy_groups, "GLOBAL", "🏡 亚太家宽"),
+        "residential_selector_us_refs": group_body_refs(visible_proxy_groups, "🏡 家宽选择", "🏡 美国家宽"),
+        "residential_selector_apac_refs": group_body_refs(visible_proxy_groups, "🏡 家宽选择", "🏡 亚太家宽"),
+        "http_probe_group_count": count_regex(proxy_groups, r"url\s*:\s*['\"]?http://cp\.cloudflare\.com/generate_204"),
         "has_residential_selector": "name: 🏡 家宽选择" in visible_proxy_groups or "name: '🏡 家宽选择'" in visible_proxy_groups or "name: \"🏡 家宽选择\"" in visible_proxy_groups,
         "residential_selector_refs": visible_text.count("🏡 家宽选择"),
         "business_selector_refs": visible_proxy_groups.count("🏡 家宽选择"),
         "has_ai_group": "name: AI服务" in visible_proxy_groups or "name: 'AI服务'" in visible_proxy_groups or "name: \"AI服务\"" in visible_proxy_groups,
         "has_paypal_group": "name: PayPal" in visible_proxy_groups or "name: 'PayPal'" in visible_proxy_groups or "name: \"PayPal\"" in visible_proxy_groups,
+        "has_self_domain_group": "name: 自有域名" in visible_proxy_groups or "name: '自有域名'" in visible_proxy_groups or "name: \"自有域名\"" in visible_proxy_groups,
         "primary_group_selector_refs": group_body_refs(visible_proxy_groups, "选择代理", "🏡 家宽选择"),
         "ai_group_selector_refs": group_body_refs(visible_proxy_groups, "AI服务", "🏡 家宽选择"),
         "paypal_group_selector_refs": group_body_refs(visible_proxy_groups, "PayPal", "🏡 家宽选择"),
+        "self_domain_direct_refs": group_body_refs(visible_proxy_groups, "自有域名", "DIRECT"),
+        "self_domain_first_proxy": first_group_proxy(visible_proxy_groups, "自有域名"),
+        "global_self_domain_refs": group_body_refs(visible_proxy_groups, "GLOBAL", "自有域名"),
+        "konbakuyomu_rule_refs": rule_items.count("DOMAIN-SUFFIX,konbakuyomu.us,自有域名"),
+        "wechat_direct_rule_refs": rule_items.count("DOMAIN-SUFFIX,weixin.qq.com,DIRECT"),
+        "qq_direct_rule_refs": rule_items.count("DOMAIN-SUFFIX,qq.com,DIRECT"),
+        "tencent_geosite_direct_refs": rule_items.count("GEOSITE,tencent,DIRECT"),
+        "cn_geosite_direct_refs": rule_items.count("GEOSITE,geolocation-cn,DIRECT") + rule_items.count("GEOSITE,cn,DIRECT"),
+        "domestic_direct_before_match": rule_before_match(rule_items, "DOMAIN-SUFFIX,weixin.qq.com,DIRECT"),
         "ai_group_region_residential_refs": group_body_regex_count(visible_proxy_groups, "AI服务", r"🏡 .+?家宽"),
         "paypal_group_region_residential_refs": group_body_regex_count(visible_proxy_groups, "PayPal", r"🏡 .+?家宽"),
         "forbidden_counts": forbidden_counts(visible_text),
@@ -339,26 +377,77 @@ def analyze_mihomo_output(text):
     return quality
 
 
-def group_body_refs(proxy_groups_text, group_name, needle):
+def extract_proxy_blocks(proxies_text):
+    blocks = []
+    current = []
+    for line in proxies_text.splitlines():
+        if re.match(r"^\s*-\s+name\s*:", line):
+            if current:
+                blocks.append("\n".join(current))
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append("\n".join(current))
+    return blocks
+
+
+def proxy_block_type(block):
+    match = re.search(r"(?m)^\s*type\s*:\s*['\"]?([^'\"\s#]+)", block)
+    return match.group(1).strip().lower() if match else ""
+
+
+def proxy_block_is_reality(block):
+    return proxy_block_type(block) == "vless" and (
+        "reality-opts" in block or re.search(r"(?i)\breality\b", block) is not None
+    )
+
+
+def proxy_block_has_sni(block):
+    return re.search(r"(?m)^\s*(sni|servername)\s*:", block) is not None
+
+
+def extract_rules(rules_text):
+    return [
+        match.group(1).strip().strip("'\"")
+        for match in re.finditer(r"(?m)^\s*-\s*(.+?)\s*$", rules_text)
+    ]
+
+
+def rule_before_match(rule_items, rule):
+    try:
+        rule_idx = rule_items.index(rule)
+    except ValueError:
+        return False
+    match_idx = next((i for i, item in enumerate(rule_items) if item.startswith("MATCH,")), -1)
+    return match_idx < 0 or rule_idx < match_idx
+
+
+def group_body(proxy_groups_text, group_name):
     pattern = r"(?m)^\s*-\s+name\s*:\s*['\"]?" + re.escape(group_name) + r"['\"]?\s*$"
     match = re.search(pattern, proxy_groups_text)
     if not match:
-        return 0
+        return ""
     start = match.end()
     next_match = re.search(r"(?m)^\s*-\s+name\s*:", proxy_groups_text[start:])
-    body = proxy_groups_text[start:] if not next_match else proxy_groups_text[start:start + next_match.start()]
-    return body.count(needle)
+    return proxy_groups_text[start:] if not next_match else proxy_groups_text[start:start + next_match.start()]
+
+
+def group_body_refs(proxy_groups_text, group_name, needle):
+    return group_body(proxy_groups_text, group_name).count(needle)
+
+
+def first_group_proxy(proxy_groups_text, group_name):
+    body = group_body(proxy_groups_text, group_name)
+    proxies = re.search(r"(?ms)^\s*proxies\s*:\s*\n(?P<items>(?:\s*-\s+.+\n?)+)", body)
+    if not proxies:
+        return ""
+    first = re.search(r"(?m)^\s*-\s+(.+?)\s*$", proxies.group("items"))
+    return first.group(1).strip().strip("'\"") if first else ""
 
 
 def group_body_regex_count(proxy_groups_text, group_name, regex):
-    pattern = r"(?m)^\s*-\s+name\s*:\s*['\"]?" + re.escape(group_name) + r"['\"]?\s*$"
-    match = re.search(pattern, proxy_groups_text)
-    if not match:
-        return 0
-    start = match.end()
-    next_match = re.search(r"(?m)^\s*-\s+name\s*:", proxy_groups_text[start:])
-    body = proxy_groups_text[start:] if not next_match else proxy_groups_text[start:start + next_match.start()]
-    return len(re.findall(regex, body))
+    return len(re.findall(regex, group_body(proxy_groups_text, group_name)))
 
 
 def same_names(left, right):
@@ -486,12 +575,37 @@ def main():
                 checks.append(ok("final mihomo has rules", http["final_mihomo"]["rule_count"] > 1, str(http["final_mihomo"]["rule_count"])))
                 checks.append(ok("final mihomo has DNS", http["final_mihomo"]["has_dns"]))
                 checks.append(ok("final mihomo has rule-providers", http["final_mihomo"]["has_rule_providers"]))
+                checks.append(ok("final mihomo keeps Evoxt HY2 nodes", http["final_mihomo"]["evoxt_hysteria2_count"] >= 3, str(http["final_mihomo"]["evoxt_hysteria2_count"])))
+                checks.append(ok("final mihomo keeps Evoxt HY2 close to Hiddify native export", http["final_mihomo"]["evoxt_hysteria2_sni_count"] == 0, str(http["final_mihomo"]["evoxt_hysteria2_sni_count"])))
+                checks.append(ok("final mihomo excludes unverified Evoxt VLESS candidates", http["final_mihomo"]["evoxt_vless_count"] == 0, str(http["final_mihomo"]["evoxt_vless_count"])))
+                checks.append(ok("final mihomo excludes broken Evoxt Reality", http["final_mihomo"]["evoxt_reality_count"] == 0, str(http["final_mihomo"]["evoxt_reality_count"])))
+                checks.append(ok("final mihomo names Evoxt nodes as Malaysia", http["final_mihomo"]["evoxt_malaysia_name_count"] >= 3, str(http["final_mihomo"]["evoxt_malaysia_name_count"])))
+                checks.append(ok("final mihomo removes Evoxt shortcut group", not http["final_mihomo"]["has_evoxt_group"]))
+                checks.append(ok("Malaysia group contains Evoxt nodes", http["final_mihomo"]["malaysia_group_evoxt_refs"] >= 3, str(http["final_mihomo"]["malaysia_group_evoxt_refs"])))
+                checks.append(ok("primary select exposes Malaysia group", http["final_mihomo"]["primary_group_malaysia_refs"] > 0, str(http["final_mihomo"]["primary_group_malaysia_refs"])))
+                checks.append(ok("GLOBAL exposes Malaysia group", http["final_mihomo"]["global_malaysia_refs"] > 0, str(http["final_mihomo"]["global_malaysia_refs"])))
+                checks.append(ok("GLOBAL does not expose removed Evoxt shortcut group", http["final_mihomo"]["global_evoxt_refs"] == 0, str(http["final_mihomo"]["global_evoxt_refs"])))
+                checks.append(ok("GLOBAL exposes US residential shortcut", http["final_mihomo"]["global_us_residential_refs"] > 0, str(http["final_mihomo"]["global_us_residential_refs"])))
+                checks.append(ok("GLOBAL exposes APAC residential shortcut", http["final_mihomo"]["global_apac_residential_refs"] > 0, str(http["final_mihomo"]["global_apac_residential_refs"])))
+                checks.append(ok("final mihomo uses HTTP 204 url-test probe", http["final_mihomo"]["http_probe_group_count"] > 0, str(http["final_mihomo"]["http_probe_group_count"])))
                 checks.append(ok("final mihomo has residential selector", http["final_mihomo"]["has_residential_selector"], str(http["final_mihomo"]["residential_selector_refs"])))
+                checks.append(ok("residential selector exposes US shortcut", http["final_mihomo"]["residential_selector_us_refs"] > 0, str(http["final_mihomo"]["residential_selector_us_refs"])))
+                checks.append(ok("residential selector exposes APAC shortcut", http["final_mihomo"]["residential_selector_apac_refs"] > 0, str(http["final_mihomo"]["residential_selector_apac_refs"])))
                 checks.append(ok("final mihomo keeps AI group", http["final_mihomo"]["has_ai_group"]))
                 checks.append(ok("final mihomo has PayPal group", http["final_mihomo"]["has_paypal_group"]))
+                checks.append(ok("final mihomo has self-domain group", http["final_mihomo"]["has_self_domain_group"]))
                 checks.append(ok("primary select can select residential selector", http["final_mihomo"]["primary_group_selector_refs"] > 0, str(http["final_mihomo"]["primary_group_selector_refs"])))
                 checks.append(ok("AI group can select residential selector", http["final_mihomo"]["ai_group_selector_refs"] > 0, str(http["final_mihomo"]["ai_group_selector_refs"])))
                 checks.append(ok("PayPal group can select residential selector", http["final_mihomo"]["paypal_group_selector_refs"] > 0, str(http["final_mihomo"]["paypal_group_selector_refs"])))
+                checks.append(ok("self-domain group defaults to DIRECT", http["final_mihomo"]["self_domain_first_proxy"] == "DIRECT", http["final_mihomo"]["self_domain_first_proxy"]))
+                checks.append(ok("self-domain group can select DIRECT", http["final_mihomo"]["self_domain_direct_refs"] > 0, str(http["final_mihomo"]["self_domain_direct_refs"])))
+                checks.append(ok("GLOBAL exposes self-domain group", http["final_mihomo"]["global_self_domain_refs"] > 0, str(http["final_mihomo"]["global_self_domain_refs"])))
+                checks.append(ok("konbakuyomu.us routes to self-domain group", http["final_mihomo"]["konbakuyomu_rule_refs"] > 0, str(http["final_mihomo"]["konbakuyomu_rule_refs"])))
+                checks.append(ok("WeChat domain routes DIRECT", http["final_mihomo"]["wechat_direct_rule_refs"] > 0, str(http["final_mihomo"]["wechat_direct_rule_refs"])))
+                checks.append(ok("QQ domain routes DIRECT", http["final_mihomo"]["qq_direct_rule_refs"] > 0, str(http["final_mihomo"]["qq_direct_rule_refs"])))
+                checks.append(ok("Tencent geosite routes DIRECT", http["final_mihomo"]["tencent_geosite_direct_refs"] > 0, str(http["final_mihomo"]["tencent_geosite_direct_refs"])))
+                checks.append(ok("China geosite routes DIRECT", http["final_mihomo"]["cn_geosite_direct_refs"] > 0, str(http["final_mihomo"]["cn_geosite_direct_refs"])))
+                checks.append(ok("domestic DIRECT rules appear before MATCH fallback", http["final_mihomo"]["domestic_direct_before_match"]))
                 checks.append(ok("AI group only exposes residential selector layer", http["final_mihomo"]["ai_group_region_residential_refs"] <= 1, str(http["final_mihomo"]["ai_group_region_residential_refs"])))
                 checks.append(ok("PayPal group only exposes residential selector layer", http["final_mihomo"]["paypal_group_region_residential_refs"] <= 1, str(http["final_mihomo"]["paypal_group_region_residential_refs"])))
                 checks.append(ok("final mihomo has residential candidates", http["final_mihomo"]["residential_candidate_count"] > 0, str(http["final_mihomo"]["residential_candidate_count"])))
