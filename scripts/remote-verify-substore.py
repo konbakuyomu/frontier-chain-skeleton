@@ -103,7 +103,7 @@ def read_backend_path(app_dir, container):
     env_file = Path(app_dir) / ".env"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("SUB_STORE_BACKEND_PATH="):
+            if line.startswith(("SUB_STORE_FRONTEND_BACKEND_PATH=", "SUB_STORE_BACKEND_PATH=")):
                 value = line.split("=", 1)[1].strip().strip('"').strip("'")
                 if value:
                     return value
@@ -115,7 +115,7 @@ def read_backend_path(app_dir, container):
             timeout=10,
         )
         for line in out.splitlines():
-            if line.startswith("SUB_STORE_FRONTEND_BACKEND_PATH="):
+            if line.startswith(("SUB_STORE_FRONTEND_BACKEND_PATH=", "SUB_STORE_BACKEND_PATH=")):
                 value = line.split("=", 1)[1].strip()
                 if value:
                     return value
@@ -124,9 +124,16 @@ def read_backend_path(app_dir, container):
     return ""
 
 
-def fetch_local(base_path, endpoint):
+def backend_path_shape(value):
+    if not value:
+        return "empty"
+    prefix = "api-prefix" if value.startswith("/api/") else "non-api-prefix"
+    return "%s len=%s" % (prefix, len(value))
+
+
+def fetch_local(local_base_url, base_path, endpoint):
     base_path = "/" + base_path.strip("/")
-    url = "http://127.0.0.1:3001" + base_path + endpoint
+    url = local_base_url.rstrip("/") + base_path + endpoint
     req = urllib.request.Request(url, headers={"User-Agent": "frontier-chain-substore-verify/1.0"})
     with urllib.request.urlopen(req, timeout=45) as resp:
         return resp.read().decode("utf-8", errors="replace")
@@ -231,9 +238,13 @@ def analyze_collection_output(text):
     quality = name_quality(names)
     quality.update({
         "bytes": len(text.encode("utf-8")),
-        "ccr_count": text.count("CCR |"),
-        "kuma_count": text.count("KUMA |"),
-        "agg_count": text.count("AGG |"),
+        "known_source_prefix_counts": {
+            "CCR": text.count("CCR |"),
+            "KUMA": text.count("KUMA |"),
+            "AGG": text.count("AGG |"),
+            "US_EDGE": text.count("US-Edge |"),
+            "EVOXT": text.count("L1-EVOXT |"),
+        },
         "forbidden_counts": forbidden_counts(text),
         "source_marker_leak": "__sourcePrefix" in text or "_sourcePrefix" in text,
         "dialer_refs": count_regex(text, r"dialer-proxy\s*:"),
@@ -538,6 +549,30 @@ def count_source_markers(subs):
     return marker_count
 
 
+def sub_has_source_marker(sub):
+    return count_source_markers([sub]) > 0
+
+
+def referenced_remote_subs(data, collection_names):
+    subs = {
+        item.get("name"): item
+        for item in data.get("subs", []) or []
+        if isinstance(item, dict) and item.get("name")
+    }
+    result = []
+    seen = set()
+    for collection_name in collection_names:
+        collection = find_named(data.get("collections", []), collection_name)
+        for sub_name in collection_subscription_names(collection):
+            if sub_name in seen:
+                continue
+            seen.add(sub_name)
+            sub = subs.get(sub_name)
+            if sub and sub.get("source") == "remote":
+                result.append(sub)
+    return result
+
+
 def summarise_forbidden_args(collection, file_item):
     return {
         "collection": obsolete_argument_keys(collection),
@@ -552,7 +587,12 @@ def main():
     parser.add_argument("--container", default="sub-store")
     parser.add_argument("--collection", default="merged-airports")
     parser.add_argument("--file", default="frontier-chain-mihomo")
-    parser.add_argument("--aggregator-name", default="aggregated-residential")
+    parser.add_argument("--ios-airports-collection", default="ios-airports-uri")
+    parser.add_argument("--ios-hy2-collection", default="ios-evoxt-hy2-shadowrocket")
+    parser.add_argument("--local-base-url", default="http://127.0.0.1:3001")
+    parser.add_argument("--expected-backend-path", default="")
+    parser.add_argument("--min-ios-ordinary-nodes", type=int, default=1)
+    parser.add_argument("--min-ios-hy2-nodes", type=int, default=0)
     parser.add_argument("--skip-http", action="store_true")
     args = parser.parse_args()
 
@@ -577,18 +617,37 @@ def main():
 
     if collection:
         collection_subs = collection_subscription_names(collection)
-        checks.append(ok("collection keeps ccrui and kuma", all(name in collection_subs for name in ("ccrui", "kuma")), ",".join(collection_subs)))
-        checks.append(ok("collection includes residential aggregator", args.aggregator_name in collection_subs, "count=" + str(len(collection_subs))))
+        checks.append(ok("source collection has pluggable upstream refs", len(collection_subs) >= 1, "count=" + str(len(collection_subs))))
         ops = script_ops(collection)
         checks.append(ok("collection script operator exists", len(ops) >= 1, "count=" + str(len(ops))))
+    ios_airports_collection = find_named(data.get("collections", []), args.ios_airports_collection)
+    ios_hy2_collection = find_named(data.get("collections", []), args.ios_hy2_collection)
+    checks.append(ok("iOS ordinary collection exists", ios_airports_collection is not None, args.ios_airports_collection))
+    checks.append(ok("iOS HY2 collection exists", ios_hy2_collection is not None, args.ios_hy2_collection))
+    if ios_airports_collection:
+        checks.append(ok(
+            "iOS ordinary collection has pluggable upstream refs",
+            len(collection_subscription_names(ios_airports_collection)) >= 1,
+            "count=" + str(len(collection_subscription_names(ios_airports_collection))),
+        ))
+    if ios_hy2_collection:
+        checks.append(warn(
+            "iOS HY2 collection upstream refs",
+            "count=" + str(len(collection_subscription_names(ios_hy2_collection))),
+        ))
     if file_item:
         ops = script_ops(file_item)
         checks.append(ok("mihomo file has two script operators", len(ops) >= 2, "count=" + str(len(ops))))
         custom_names = [str(op.get("customName") or "") for op in ops]
         checks.append(ok("powerfullz operator present", any("powerfullz" in n.lower() for n in custom_names), ", ".join(custom_names)))
 
-    marker_count = count_source_markers(subs)
-    checks.append(ok("source marker operators present", marker_count >= len(subs), "markers=%s subs=%s" % (marker_count, len(subs))))
+    marker_subs = referenced_remote_subs(data, [args.collection, args.ios_airports_collection])
+    missing_markers = [sub.get("name") for sub in marker_subs if not sub_has_source_marker(sub)]
+    checks.append(ok(
+        "referenced remote upstreams have source markers",
+        not missing_markers,
+        "checked=%s missing=%s" % (len(marker_subs), len(missing_markers)),
+    ))
     forbidden_args = summarise_forbidden_args(collection, file_item)
     checks.append(ok("obsolete Frontier/ScrapeGW/VPS arguments removed", not forbidden_args["collection"] and not forbidden_args["file"], safe_detail_dict(forbidden_args)))
 
@@ -598,12 +657,19 @@ def main():
     uri_names = []
     if not args.skip_http:
         backend_path = read_backend_path(args.app_dir, args.container)
+        checks.append(ok("Sub-Store backend path available", bool(backend_path), backend_path_shape(backend_path)))
+        if args.expected_backend_path:
+            checks.append(ok(
+                "Sub-Store backend path matches expected client URL",
+                backend_path == args.expected_backend_path,
+                "actual=%s expected=%s" % (backend_path_shape(backend_path), backend_path_shape(args.expected_backend_path)),
+            ))
         if backend_path:
             try:
-                clash = fetch_local(backend_path, "/download/collection/%s?target=ClashMeta" % args.collection)
+                clash = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=ClashMeta" % args.collection)
                 http["collection_clashmeta"] = analyze_collection_output(clash)
                 clash_names = extract_proxy_names(clash)
-                checks.append(ok("ClashMeta collection has normalized prefixes", any(prefix in clash for prefix in ("CCR |", "KUMA |", "AGG |"))))
+                checks.append(ok("ClashMeta collection has nodes", len(clash_names) > 0, "count=" + str(len(clash_names))))
                 checks.append(ok("ClashMeta collection has no retired link names", not http["collection_clashmeta"]["forbidden_counts"], safe_detail_dict(http["collection_clashmeta"]["forbidden_counts"])))
                 checks.append(ok("ClashMeta collection has no source marker leak", not http["collection_clashmeta"]["source_marker_leak"]))
                 checks.append(ok("ClashMeta collection has residential candidates", http["collection_clashmeta"]["residential_candidate_count"] > 0, str(http["collection_clashmeta"]["residential_candidate_count"])))
@@ -612,7 +678,7 @@ def main():
             except Exception as exc:
                 checks.append(warn("ClashMeta collection fetch skipped", str(exc)))
             try:
-                shadow = fetch_local(backend_path, "/download/collection/%s?target=ShadowRocket" % args.collection)
+                shadow = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=ShadowRocket" % args.collection)
                 http["collection_shadowrocket"] = analyze_collection_output(shadow)
                 shadow_names = extract_proxy_names(shadow)
                 checks.append(ok("ShadowRocket collection has no retired link names", not http["collection_shadowrocket"]["forbidden_counts"], safe_detail_dict(http["collection_shadowrocket"]["forbidden_counts"])))
@@ -627,7 +693,7 @@ def main():
             else:
                 checks.append(ok("ClashMeta and ShadowRocket names match", equal_names, "clash=%s shadow=%s" % (len(clash_names), len(shadow_names))))
             try:
-                uri = fetch_local(backend_path, "/download/collection/%s?target=URI" % args.collection)
+                uri = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=URI" % args.collection)
                 http["collection_uri"] = analyze_uri_output(uri)
                 uri_names = extract_proxy_names(uri)
                 uri_schemes = http["collection_uri"]["scheme_counts"]
@@ -639,46 +705,42 @@ def main():
             except Exception as exc:
                 checks.append(warn("URI collection fetch skipped", str(exc)))
             try:
-                ios_uri = fetch_local(backend_path, "/download/collection/ios-airports-uri?target=URI")
+                ios_uri = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=URI" % args.ios_airports_collection)
                 http["ios_airports_uri"] = analyze_uri_output(ios_uri)
                 ios_uri_schemes = http["ios_airports_uri"]["scheme_counts"]
                 checks.append(ok("iOS airports URI collection is line-based", not http["ios_airports_uri"]["has_yaml_shape"], safe_detail_dict(ios_uri_schemes)))
                 checks.append(ok("iOS airports URI excludes Evoxt", "L1-EVOXT" not in ios_uri, str(ios_uri.count("L1-EVOXT"))))
-                checks.append(ok("iOS airports URI has ordinary nodes", http["ios_airports_uri"]["line_count"] >= 200, str(http["ios_airports_uri"]["line_count"])))
+                checks.append(ok("iOS airports URI has ordinary nodes", http["ios_airports_uri"]["line_count"] >= args.min_ios_ordinary_nodes, str(http["ios_airports_uri"]["line_count"])))
                 checks.append(ok("iOS airports URI keeps residential candidates", http["ios_airports_uri"]["residential_candidate_count"] > 0, str(http["ios_airports_uri"]["residential_candidate_count"])))
             except Exception as exc:
                 checks.append(warn("iOS airports URI collection fetch skipped", str(exc)))
             try:
-                ios_hy2 = fetch_local(backend_path, "/download/collection/ios-evoxt-hy2-shadowrocket?target=ShadowRocket")
+                ios_hy2 = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=ShadowRocket" % args.ios_hy2_collection)
                 http["ios_evoxt_hy2_shadowrocket"] = analyze_ios_hy2_shadowrocket_output(ios_hy2)
                 checks.append(ok("iOS Evoxt HY2 collection is YAML for Shadowrocket", http["ios_evoxt_hy2_shadowrocket"]["has_yaml_shape"]))
-                checks.append(ok("iOS Evoxt HY2 collection has exactly three Evoxt nodes", http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"] == 3, str(http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"])))
-                checks.append(ok("iOS Evoxt HY2 collection only has hysteria2 nodes", http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"] == 3 and http["ios_evoxt_hy2_shadowrocket"]["proxy_count"] == 3, "hy2=%s total=%s" % (http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"], http["ios_evoxt_hy2_shadowrocket"]["proxy_count"])))
+                checks.append(ok("iOS HY2 collection meets minimum node count", http["ios_evoxt_hy2_shadowrocket"]["proxy_count"] >= args.min_ios_hy2_nodes, str(http["ios_evoxt_hy2_shadowrocket"]["proxy_count"])))
+                checks.append(ok("iOS HY2 collection only has hysteria2 nodes when present", http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"] == http["ios_evoxt_hy2_shadowrocket"]["proxy_count"], "hy2=%s total=%s" % (http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"], http["ios_evoxt_hy2_shadowrocket"]["proxy_count"])))
             except Exception as exc:
                 checks.append(warn("iOS Evoxt HY2 collection fetch skipped", str(exc)))
             try:
-                final = fetch_local(backend_path, "/api/file/%s?target=mihomo" % args.file)
+                final = fetch_local(args.local_base_url, backend_path, "/api/file/%s?target=mihomo" % args.file)
                 http["final_mihomo"] = analyze_mihomo_output(final)
                 checks.append(ok("final mihomo has proxy groups", http["final_mihomo"]["proxy_group_count"] > 1, str(http["final_mihomo"]["proxy_group_count"])))
                 checks.append(ok("final mihomo has rules", http["final_mihomo"]["rule_count"] > 1, str(http["final_mihomo"]["rule_count"])))
                 checks.append(ok("final mihomo has DNS", http["final_mihomo"]["has_dns"]))
                 checks.append(ok("final mihomo has rule-providers", http["final_mihomo"]["has_rule_providers"]))
-                checks.append(ok("final mihomo keeps Evoxt HY2 nodes", http["final_mihomo"]["evoxt_hysteria2_count"] >= 3, str(http["final_mihomo"]["evoxt_hysteria2_count"])))
-                checks.append(ok("final mihomo keeps Evoxt HY2 close to Hiddify native export", http["final_mihomo"]["evoxt_hysteria2_sni_count"] == 0, str(http["final_mihomo"]["evoxt_hysteria2_sni_count"])))
-                checks.append(ok("final mihomo excludes unverified Evoxt VLESS candidates", http["final_mihomo"]["evoxt_vless_count"] == 0, str(http["final_mihomo"]["evoxt_vless_count"])))
-                checks.append(ok("final mihomo excludes broken Evoxt Reality", http["final_mihomo"]["evoxt_reality_count"] == 0, str(http["final_mihomo"]["evoxt_reality_count"])))
-                checks.append(ok("final mihomo names Evoxt nodes as Malaysia", http["final_mihomo"]["evoxt_malaysia_name_count"] >= 3, str(http["final_mihomo"]["evoxt_malaysia_name_count"])))
-                checks.append(ok("final mihomo removes Evoxt shortcut group", not http["final_mihomo"]["has_evoxt_group"]))
-                checks.append(ok("Malaysia group contains Evoxt nodes", http["final_mihomo"]["malaysia_group_evoxt_refs"] >= 3, str(http["final_mihomo"]["malaysia_group_evoxt_refs"])))
-                checks.append(ok("primary select exposes Malaysia group", http["final_mihomo"]["primary_group_malaysia_refs"] > 0, str(http["final_mihomo"]["primary_group_malaysia_refs"])))
-                checks.append(ok("GLOBAL exposes Malaysia group", http["final_mihomo"]["global_malaysia_refs"] > 0, str(http["final_mihomo"]["global_malaysia_refs"])))
+                checks.append(warn("final mihomo Evoxt/HY2 stats", safe_detail_dict({
+                    "evoxt_node_count": http["final_mihomo"]["evoxt_node_count"],
+                    "hysteria2_count": http["final_mihomo"]["evoxt_hysteria2_count"],
+                    "vless_count": http["final_mihomo"]["evoxt_vless_count"],
+                    "reality_count": http["final_mihomo"]["evoxt_reality_count"],
+                    "malaysia_group_refs": http["final_mihomo"]["malaysia_group_evoxt_refs"],
+                })))
                 checks.append(ok("GLOBAL does not expose removed Evoxt shortcut group", http["final_mihomo"]["global_evoxt_refs"] == 0, str(http["final_mihomo"]["global_evoxt_refs"])))
-                checks.append(ok("GLOBAL exposes US residential shortcut", http["final_mihomo"]["global_us_residential_refs"] > 0, str(http["final_mihomo"]["global_us_residential_refs"])))
-                checks.append(ok("GLOBAL exposes APAC residential shortcut", http["final_mihomo"]["global_apac_residential_refs"] > 0, str(http["final_mihomo"]["global_apac_residential_refs"])))
+                checks.append(ok("final mihomo uses stable residential shortcut layer", http["final_mihomo"]["global_us_residential_refs"] > 0 or http["final_mihomo"]["global_apac_residential_refs"] > 0, "us=%s apac=%s" % (http["final_mihomo"]["global_us_residential_refs"], http["final_mihomo"]["global_apac_residential_refs"])))
                 checks.append(ok("final mihomo uses HTTP 204 url-test probe", http["final_mihomo"]["http_probe_group_count"] > 0, str(http["final_mihomo"]["http_probe_group_count"])))
                 checks.append(ok("final mihomo has residential selector", http["final_mihomo"]["has_residential_selector"], str(http["final_mihomo"]["residential_selector_refs"])))
-                checks.append(ok("residential selector exposes US shortcut", http["final_mihomo"]["residential_selector_us_refs"] > 0, str(http["final_mihomo"]["residential_selector_us_refs"])))
-                checks.append(ok("residential selector exposes APAC shortcut", http["final_mihomo"]["residential_selector_apac_refs"] > 0, str(http["final_mihomo"]["residential_selector_apac_refs"])))
+                checks.append(ok("residential selector exposes regional shortcut layer", http["final_mihomo"]["residential_selector_us_refs"] > 0 or http["final_mihomo"]["residential_selector_apac_refs"] > 0, "us=%s apac=%s" % (http["final_mihomo"]["residential_selector_us_refs"], http["final_mihomo"]["residential_selector_apac_refs"])))
                 checks.append(ok("final mihomo keeps AI group", http["final_mihomo"]["has_ai_group"]))
                 checks.append(ok("final mihomo has PayPal group", http["final_mihomo"]["has_paypal_group"]))
                 checks.append(ok("final mihomo has self-domain group", http["final_mihomo"]["has_self_domain_group"]))

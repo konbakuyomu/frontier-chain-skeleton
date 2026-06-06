@@ -34,11 +34,17 @@ param(
   [string]$SshKey = $env:FRONTIER_SUBSTORE_SSH_KEY,
 
   [string]$SubStoreDir = '/opt/1panel/apps/sub-store/sub-store',
+  [string]$SubStoreDataPath = '',
+  [string]$SubStoreBackupDir = '',
   [string]$ContainerName = 'sub-store',
+  [string]$CollectionName = 'merged-airports',
+  [string]$MihomoFileName = 'frontier-chain-mihomo',
   [string]$ResidentialAggregatorUrl = $env:FRONTIER_RESIDENTIAL_AGGREGATOR_URL,
   [string]$ResidentialAggregatorName = 'aggregated-residential',
   [string]$ResidentialAggregatorDisplayName = '家宽聚合订阅',
   [string]$ResidentialAggregatorSourcePrefix = 'AGG',
+  [string]$IosAirportsSubscriptions = $env:FRONTIER_IOS_AIRPORTS_SUBSCRIPTIONS,
+  [string]$IosHy2Subscriptions = $env:FRONTIER_IOS_HY2_SUBSCRIPTIONS,
   [switch]$NoBackup,
   [switch]$NoRestart
 )
@@ -47,6 +53,8 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $SshPort) { $SshPort = '22' }
 if (-not $SshUser) { $SshUser = 'root' }
+if (-not $SubStoreDataPath) { $SubStoreDataPath = "$SubStoreDir/data/sub-store.json" }
+if (-not $SubStoreBackupDir) { $SubStoreBackupDir = "$SubStoreDir/backups" }
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Files = @{
@@ -115,6 +123,9 @@ if ($ResidentialAggregatorUrl -and -not ($selected -contains 'source-marker')) {
 
 Write-Info "repo root: $RepoRoot"
 Write-Info "targets: $($selected -join ', ')"
+Write-Info "target Sub-Store dir: $SubStoreDir"
+Write-Info "target collection: $CollectionName"
+Write-Info "target mihomo file: $MihomoFileName"
 
 foreach ($target in $selected) {
   Test-RequiredFile $Files[$target]
@@ -145,6 +156,12 @@ if (-not $Apply) {
   }
   if ($ResidentialAggregatorUrl) {
     Write-Host ("  {0,-18} -> {1} ({2})" -f 'residential-upstream', $ResidentialAggregatorName, $ResidentialAggregatorSourcePrefix)
+  }
+  if ($IosAirportsSubscriptions) {
+    Write-Host ("  {0,-18} -> explicit subscription list" -f 'ios-airports-uri')
+  }
+  if ($IosHy2Subscriptions) {
+    Write-Host ("  {0,-18} -> explicit subscription list" -f 'ios-hy2')
   }
   exit 0
 }
@@ -183,9 +200,11 @@ try {
     'python3',
     (Quote-Remote "$remoteStage/remote-apply-substore.py"),
     '--app-dir', (Quote-Remote $SubStoreDir),
-    '--data', (Quote-Remote "$SubStoreDir/data/sub-store.json"),
-    '--backup-dir', (Quote-Remote "$SubStoreDir/backups"),
-    '--container', (Quote-Remote $ContainerName)
+    '--data', (Quote-Remote $SubStoreDataPath),
+    '--backup-dir', (Quote-Remote $SubStoreBackupDir),
+    '--container', (Quote-Remote $ContainerName),
+    '--collection', (Quote-Remote $CollectionName),
+    '--file', (Quote-Remote $MihomoFileName)
   )
 
   if ($selected -contains 'source-marker') {
@@ -207,6 +226,12 @@ try {
       '--aggregator-display-name', (Quote-Remote $ResidentialAggregatorDisplayName),
       '--aggregator-source-prefix', (Quote-Remote $ResidentialAggregatorSourcePrefix)
     )
+  }
+  if ($IosAirportsSubscriptions) {
+    $cmd += @('--ios-airports-subscriptions', (Quote-Remote $IosAirportsSubscriptions))
+  }
+  if ($IosHy2Subscriptions) {
+    $cmd += @('--ios-hy2-subscriptions', (Quote-Remote $IosHy2Subscriptions))
   }
   if ($NoBackup) { $cmd += '--no-backup' }
   if ($NoRestart) { $cmd += '--no-restart' }

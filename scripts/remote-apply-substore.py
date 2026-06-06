@@ -4,7 +4,9 @@ Apply frontier-chain-skeleton source files to a live Sub-Store data file.
 
 This script is intended to run on the VPS. It updates non-secret Script
 Operator content, can add one residential upstream subscription from stdin, and
-preserves existing tokens plus unrelated upstream subscription URLs.
+preserves existing tokens plus unrelated upstream subscription URLs. Client
+facing iOS collections are preserved by default so a target Sub-Store can own
+its upstream pool without hardcoded supplier names.
 """
 
 import argparse
@@ -31,6 +33,7 @@ IOS_AIRPORTS_COLLECTION = "ios-airports-uri"
 IOS_AIRPORTS_DISPLAY_NAME = "iOS Shadowrocket 节点订阅 - 普通机场与家宽 URI"
 IOS_EVOXT_HY2_COLLECTION = "ios-evoxt-hy2-shadowrocket"
 IOS_EVOXT_HY2_DISPLAY_NAME = "iOS Shadowrocket 节点订阅 - Evoxt HY2"
+LEGACY_EVOXT_HY2_SUBSCRIPTION = "substore-evoxt-upstream"
 
 
 def read_text(path):
@@ -46,6 +49,76 @@ def find_named(items, name):
         if isinstance(item, dict) and item.get("name") == name:
             return item
     return None
+
+
+def split_names(value):
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        values = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        values = text.replace("\n", ",").split(",")
+    names = []
+    seen = set()
+    for raw in values:
+        name = str(raw).strip()
+        if not name or name in seen:
+            continue
+        names.append(name)
+        seen.add(name)
+    return names
+
+
+def collection_subscription_names(collection):
+    values = []
+    for item in (collection or {}).get("subscriptions", []) or []:
+        if isinstance(item, str):
+            values.append(item)
+        elif isinstance(item, dict):
+            values.append(str(item.get("name") or item.get("tag") or ""))
+    return [value for value in values if value]
+
+
+def existing_collection_subscriptions(data, collection_name):
+    collection = find_named(data.get("collections", []), collection_name)
+    if not collection:
+        return None
+    names = collection_subscription_names(collection)
+    return names or None
+
+
+def subscription_exists(data, subscription_name):
+    return find_named(data.get("subs", []), subscription_name) is not None
+
+
+def resolve_ios_hy2_subscriptions(data, explicit_names):
+    if explicit_names is not None:
+        return explicit_names
+    existing = existing_collection_subscriptions(data, IOS_EVOXT_HY2_COLLECTION)
+    if existing is not None:
+        return existing
+    if subscription_exists(data, LEGACY_EVOXT_HY2_SUBSCRIPTION):
+        return [LEGACY_EVOXT_HY2_SUBSCRIPTION]
+    return []
+
+
+def resolve_ios_airports_subscriptions(data, source_collection_name, explicit_names, hy2_names):
+    if explicit_names is not None:
+        return explicit_names
+    existing = existing_collection_subscriptions(data, IOS_AIRPORTS_COLLECTION)
+    if existing is not None:
+        return existing
+    source = find_named(data.get("collections", []), source_collection_name)
+    if not source:
+        raise RuntimeError("missing collection: " + source_collection_name)
+    hy2_set = set(hy2_names or [])
+    return [
+        name for name in collection_subscription_names(source)
+        if name not in hy2_set
+    ]
 
 
 def script_ops(item):
@@ -305,14 +378,26 @@ def ensure_collection_share_token(data, name, display_name):
     return changed
 
 
-def ensure_ios_shadowrocket_collections(data, source_collection_name, evoxt_subscription_name):
+def ensure_ios_shadowrocket_collections(
+    data,
+    source_collection_name,
+    ios_airports_subscriptions=None,
+    ios_hy2_subscriptions=None,
+):
     changed = []
+    resolved_hy2 = resolve_ios_hy2_subscriptions(data, ios_hy2_subscriptions)
+    resolved_airports = resolve_ios_airports_subscriptions(
+        data,
+        source_collection_name,
+        ios_airports_subscriptions,
+        resolved_hy2,
+    )
     changed += ensure_collection_variant(
         data,
         source_collection_name,
         IOS_AIRPORTS_COLLECTION,
         IOS_AIRPORTS_DISPLAY_NAME,
-        ["ccrui", "kuma", DEFAULT_AGGREGATOR_NAME],
+        resolved_airports,
         "iPhone Shadowrocket 普通机场/家宽节点订阅；使用 target=URI，避免 target=ShadowRocket YAML 兼容问题。",
     )
     changed += ensure_collection_variant(
@@ -320,7 +405,7 @@ def ensure_ios_shadowrocket_collections(data, source_collection_name, evoxt_subs
         source_collection_name,
         IOS_EVOXT_HY2_COLLECTION,
         IOS_EVOXT_HY2_DISPLAY_NAME,
-        [evoxt_subscription_name],
+        resolved_hy2,
         "iPhone Shadowrocket Evoxt HY2 专用节点订阅；使用 target=ShadowRocket，保留实机可测速的 HY2 YAML 形态。",
     )
     changed += ensure_collection_share_token(data, IOS_AIRPORTS_COLLECTION, "iOS节点-普通机场家宽-URI")
@@ -375,6 +460,8 @@ def main():
     parser.add_argument("--aggregator-name", default=DEFAULT_AGGREGATOR_NAME)
     parser.add_argument("--aggregator-display-name", default=DEFAULT_AGGREGATOR_DISPLAY_NAME)
     parser.add_argument("--aggregator-source-prefix", default=DEFAULT_AGGREGATOR_SOURCE_PREFIX)
+    parser.add_argument("--ios-airports-subscriptions", default="")
+    parser.add_argument("--ios-hy2-subscriptions", "--ios-hy2-subscription", dest="ios_hy2_subscriptions", default="")
     parser.add_argument("--no-backup", action="store_true")
     parser.add_argument("--no-restart", action="store_true")
     args = parser.parse_args()
@@ -426,7 +513,12 @@ def main():
             "sha256": short_hash(content),
         })
 
-    ios_names = ensure_ios_shadowrocket_collections(data, args.collection, "substore-evoxt-upstream")
+    ios_names = ensure_ios_shadowrocket_collections(
+        data,
+        args.collection,
+        split_names(args.ios_airports_subscriptions),
+        split_names(args.ios_hy2_subscriptions),
+    )
     changes.append({
         "target": "ios-shadowrocket-collections",
         "changed": ios_names,

@@ -25,13 +25,23 @@ param(
   [string]$SshKey = $env:FRONTIER_SUBSTORE_SSH_KEY,
 
   [string]$SubStoreDir = '/opt/1panel/apps/sub-store/sub-store',
-  [string]$ContainerName = 'sub-store'
+  [string]$SubStoreDataPath = '',
+  [string]$ContainerName = 'sub-store',
+  [string]$CollectionName = 'merged-airports',
+  [string]$MihomoFileName = 'frontier-chain-mihomo',
+  [string]$IosAirportsCollection = 'ios-airports-uri',
+  [string]$IosHy2Collection = 'ios-evoxt-hy2-shadowrocket',
+  [string]$LocalBaseUrl = 'http://127.0.0.1:3001',
+  [string]$ExpectedBackendPath = $env:FRONTIER_EXPECTED_BACKEND_PATH,
+  [int]$MinIosOrdinaryNodes = 1,
+  [int]$MinIosHy2Nodes = 0
 )
 
 $ErrorActionPreference = 'Stop'
 
 if (-not $SshPort) { $SshPort = '22' }
 if (-not $SshUser) { $SshUser = 'root' }
+if (-not $SubStoreDataPath) { $SubStoreDataPath = "$SubStoreDir/data/sub-store.json" }
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $JsFiles = @(
@@ -97,16 +107,16 @@ if ($srText -match 'frontier-chain-skeleton@main') {
 if ($srText -match 'ai-extensions\.list') {
   throw 'shadowrocket.conf must inline own AI extension rules instead of loading ai-extensions.list through a cached branch URL'
 }
-if ($srText -notmatch '马来西亚节点\s*=') {
-  throw 'shadowrocket.conf missing Malaysia region group'
+if ($srText -notmatch '\u8282\u70b9\u9009\u62e9[^\r\n]*\u5bb6\u5bbd\u9009\u62e9') {
+  throw 'shadowrocket.conf primary selector does not expose stable residential selector'
 }
-if ($srText -notmatch '🚀 节点选择[^\r\n]*马来西亚节点') {
-  throw 'shadowrocket.conf primary selector does not expose Malaysia region group'
-}
-if ($srText -notmatch '🏡 家宽选择[^\r\n]*🏡 美国家宽' -or $srText -notmatch '🏡 家宽选择[^\r\n]*🏡 亚太家宽') {
+if ($srText -notmatch '\u5bb6\u5bbd\u9009\u62e9[^\r\n]*\u7f8e\u56fd\u5bb6\u5bbd' -or $srText -notmatch '\u5bb6\u5bbd\u9009\u62e9[^\r\n]*\u4e9a\u592a\u5bb6\u5bbd') {
   throw 'shadowrocket.conf residential selector missing US/APAC residential shortcuts'
 }
-if ($srText -notmatch 'DOMAIN,cloudcode-pa\.googleapis\.com,🤖 AI 服务' -or $srText -notmatch 'DOMAIN,cloudaicompanion\.googleapis\.com,🤖 AI 服务') {
+if ($srText -notmatch 'AI \u670d\u52a1[^\r\n]*policy-select-name=.*\u5bb6\u5bbd\u9009\u62e9' -or $srText -notmatch 'PayPal[^\r\n]*policy-select-name=.*\u5bb6\u5bbd\u9009\u62e9') {
+  throw 'shadowrocket.conf AI/PayPal groups must default to the stable residential selector'
+}
+if ($srText -notmatch 'DOMAIN,cloudcode-pa\.googleapis\.com,' -or $srText -notmatch 'DOMAIN,cloudaicompanion\.googleapis\.com,') {
   throw 'shadowrocket.conf missing inline Codex/Gemini AI extension rules'
 }
 Write-Ok 'shadowrocket.conf local checks passed'
@@ -138,9 +148,19 @@ try {
     'python3',
     (Quote-Remote "$remoteStage/remote-verify-substore.py"),
     '--app-dir', (Quote-Remote $SubStoreDir),
-    '--data', (Quote-Remote "$SubStoreDir/data/sub-store.json"),
-    '--container', (Quote-Remote $ContainerName)
+    '--data', (Quote-Remote $SubStoreDataPath),
+    '--container', (Quote-Remote $ContainerName),
+    '--collection', (Quote-Remote $CollectionName),
+    '--file', (Quote-Remote $MihomoFileName),
+    '--ios-airports-collection', (Quote-Remote $IosAirportsCollection),
+    '--ios-hy2-collection', (Quote-Remote $IosHy2Collection),
+    '--local-base-url', (Quote-Remote $LocalBaseUrl),
+    '--min-ios-ordinary-nodes', $MinIosOrdinaryNodes,
+    '--min-ios-hy2-nodes', $MinIosHy2Nodes
   )
+  if ($ExpectedBackendPath) {
+    $cmd += @('--expected-backend-path', (Quote-Remote $ExpectedBackendPath))
+  }
   if ($SkipHttp) { $cmd += '--skip-http' }
 
   Write-Info 'running remote read-only verification'

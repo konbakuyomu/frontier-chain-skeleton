@@ -1,0 +1,10 @@
+# role_id	mode	region	upstream_filter	client_display_name
+# mode:
+#   direct   -> this edge VPS exits directly; upstream_filter must be "-"
+#   url-test -> mihomo tests matching upstreams from edge-us-upstreams
+#   select   -> mihomo exposes a stable role backed by matching upstreams
+#
+# Keep this file public-safe: no subscription URLs, UUIDs, tokens, backend paths, passwords, or real server IPs.
+us-direct	direct	US	-	US-Edge | 美国-VPS直出
+us-resi-auto	url-test	US	.*	US-Edge | 美国-家宽自动
+us-att	select	US	(?i)(AT&T|ATT|微信kuma|美国.*AT&T|美国.*ATT|AT&T.*家宽|ATT.*家宽)	US-Edge | 美国-AT&T家宽

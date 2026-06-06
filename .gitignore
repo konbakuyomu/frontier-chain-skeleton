@@ -4,4 +4,6 @@ __pycache__/
 *.bak
 *.bak-*
 .test.js
+.secrets.local/
 vps-relay/.secrets.local/
+frontier-edge/.secrets.local/

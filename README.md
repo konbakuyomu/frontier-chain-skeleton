@@ -21,7 +21,7 @@ Shadowrocket(iOS)
 
 - Sub-Store 合并普通机场订阅与家宽订阅。
 - 过滤伪节点、不可直连提示节点、已知超时家宽节点。
-- 统一节点名前缀，例如 `CCR | ...`、`KUMA | ...`、`AGG | ...`。
+- 统一节点名前缀；具体前缀来自 Sub-Store 上游，不作为业务规则硬依赖。
 - mihomo 端新增 `🏡 家宽选择`：`select + include-all + filter` 动态吸纳家宽候选。
 - Shadowrocket 端保留双订阅模型，用 `select + policy-regex-filter` 动态列出家宽候选。
 - AI / PayPal / Google 等业务组只追加 `🏡 家宽选择`；区域家宽组只在 `🏡 家宽选择` 内部展示。
@@ -30,7 +30,7 @@ Shadowrocket(iOS)
 
 本仓库不存任何真实订阅 URL、token、后端路径、密码或 VPS 凭据。
 
-敏感值只放在 VPS Sub-Store 运行态，或通过部署命令的环境变量临时传入：
+敏感值只放在目标 VPS Sub-Store 运行态，或通过部署命令的环境变量临时传入：
 
 ```powershell
 $env:FRONTIER_RESIDENTIAL_AGGREGATOR_URL = '<NEW_AGGREGATOR_SUBSCRIPTION_URL>'
@@ -68,7 +68,7 @@ $env:FRONTIER_RESIDENTIAL_AGGREGATOR_URL = '<NEW_AGGREGATOR_SUBSCRIPTION_URL>'
   -SshKey <private-key-path>
 ```
 
-首次新增或替换家宽聚合订阅时，把 URL 临时放入环境变量：
+首次新增或替换某个家宽聚合订阅时，把 URL 临时放入环境变量：
 
 ```powershell
 $env:FRONTIER_RESIDENTIAL_AGGREGATOR_URL = '<NEW_AGGREGATOR_SUBSCRIPTION_URL>'
@@ -83,8 +83,8 @@ Remove-Item Env:\FRONTIER_RESIDENTIAL_AGGREGATOR_URL
 脚本会：
 
 - 备份 VPS 上的 `sub-store.json`。
-- 新增或更新 `aggregated-residential` 上游订阅。
-- 把它加入 `merged-airports`，同时保留 `ccrui` / `kuma`。
+- 可选新增或更新一个家宽聚合上游订阅。
+- 默认保留目标 Sub-Store 里已有的 iOS 普通/HY2 集合组成；如果目标集合不存在，则从源集合推导普通节点池。
 - 更新 source marker、Collection 清洗脚本和 mihomo 主脚本。
 - 清理旧 `frontier_*` / `scrapegw_*` / `vps_*` Script Operator arguments。
 - 重启 `sub-store` 容器。
@@ -101,12 +101,29 @@ Remove-Item Env:\FRONTIER_RESIDENTIAL_AGGREGATOR_URL
   -SshKey <private-key-path>
 ```
 
+迁移控制面且要求客户端旧 URL 不变时，额外传入旧 URL 里的 backend path 做兼容校验：
+
+```powershell
+$env:FRONTIER_EXPECTED_BACKEND_PATH = '<EXISTING_CLIENT_BACKEND_PATH>'
+.\scripts\verify-substore.ps1 `
+  -SshHost <vps-host> `
+  -SshPort <ssh-port> `
+  -SshUser root `
+  -SshKey <private-key-path> `
+  -SubStoreDir /opt/frontier/sub-store `
+  -SubStoreDataPath /opt/frontier/sub-store/data/sub-store.json `
+  -ContainerName frontier-sub-store `
+  -LocalBaseUrl http://127.0.0.1:19093
+Remove-Item Env:\FRONTIER_EXPECTED_BACKEND_PATH
+```
+
 验收重点：
 
 - `docker logs sub-store --tail 200` 无 `missing` / `error` / `fail` / `exception`。
-- `merged-airports` 同时包含 `ccrui`、`kuma`、`aggregated-residential`。
+- 控制面迁移时，Sub-Store 容器 env 里的 backend path 必须匹配客户端正在使用的旧 URL path；脚本只输出长度和是否匹配。
+- 源集合和 iOS 普通集合都存在，且包含至少一个上游引用。
 - iOS 普通机场/家宽订阅 `ios-airports-uri?target=URI` 输出原生 URI，且不含 Evoxt。
-- iOS Evoxt HY2 订阅 `ios-evoxt-hy2-shadowrocket?target=ShadowRocket` 只输出 3 个 Evoxt HY2。
+- iOS Evoxt HY2 订阅 `ios-evoxt-hy2-shadowrocket?target=ShadowRocket` 与普通 URI feed 分离；Evoxt 作为可插拔上游保留或移除。
 - 输出中没有 `[VPS->家宽]`、`[机场->家宽]`、`Frontier`、`ScrapeGW`。
 - 输出中没有伪节点、不可直连提示节点、已知超时家宽节点。
 - final mihomo YAML 含 `🏡 家宽选择`，且 profile-check 通过。
