@@ -7,6 +7,7 @@
  * 可选 arguments:
  *   source_prefix_map: {"subscription-name":"PREFIX"}
  *   timeout_residential_names: ["exact node name", ...]
+ *   collection_profile: "ordinary" | "hy2"
  *
  * 安全约束:
  *   - 不写默认凭据、不硬编码供应商订阅 URL
@@ -576,6 +577,43 @@ function normalizeEvoxtHysteria2Node(proxy, normalizedName, sourcePrefix) {
   delete proxy.servername;
 }
 
+function isHy2Proxy(proxy) {
+  return String((proxy && proxy.type) || '').toLowerCase() === 'hysteria2';
+}
+
+function isHy2OnlyNode(proxy) {
+  var name = String((proxy && proxy.name) || '');
+  return isHy2Proxy(proxy) && (
+    /L1-EVOXT\s*\|/.test(name) ||
+    isPreservedMineHy2NodeName(name)
+  );
+}
+
+function applyCollectionProfileFilter(proxies) {
+  var profile = String(getCred('collection_profile') || '').trim().toLowerCase();
+  if (!profile || !Array.isArray(proxies)) return proxies;
+
+  var out = [];
+  for (var i = 0; i < proxies.length; i++) {
+    var proxy = proxies[i];
+    if (!proxy) continue;
+    if (profile === 'ordinary') {
+      if (isHy2OnlyNode(proxy)) continue;
+      out.push(proxy);
+      continue;
+    }
+    if (profile === 'hy2') {
+      if (isHy2OnlyNode(proxy)) out.push(proxy);
+      continue;
+    }
+    out.push(proxy);
+  }
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[shadowrocket-injector] collection_profile=' + profile + ' filtered=' + proxies.length + '->' + out.length);
+  }
+  return out;
+}
+
 function normalizeAirportProxies(proxies) {
   if (!Array.isArray(proxies)) return proxies;
 
@@ -681,7 +719,7 @@ function operator(proxies, targetPlatform, context) {
     }
     console.log('[shadowrocket-injector] operator entry: target=' + targetPlatform + ' input_count=' + (Array.isArray(proxies) ? proxies.length : 'N/A') + ' input_dialer=' + dialerCount + ' input_underlying=' + underlyingCount);
   }
-  const normalizedProxies = normalizeAirportProxies(proxies);
+  const normalizedProxies = applyCollectionProfileFilter(normalizeAirportProxies(proxies));
   if (typeof console !== 'undefined' && console.log) {
     var outDialer = 0;
     var outOldRefs = 0;

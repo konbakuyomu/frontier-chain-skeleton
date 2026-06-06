@@ -12,11 +12,11 @@ const path = require("path");
 
 const dataPath = process.argv[2] || "/opt/app/data/sub-store.json";
 const upstreamName = process.env.EDGE_UPSTREAM_SUB || "edge-us-att";
-const upstreamDisplay = process.env.EDGE_UPSTREAM_DISPLAY || "US Edge upstream - AT&T";
+const upstreamDisplay = process.env.EDGE_UPSTREAM_DISPLAY || "20-原料-家宽-美国-AT&T";
 const collectionName = process.env.EDGE_UPSTREAM_COLLECTION || "edge-us-upstreams";
-const collectionDisplay = process.env.EDGE_UPSTREAM_COLLECTION_DISPLAY || "US Edge upstreams";
+const collectionDisplay = process.env.EDGE_UPSTREAM_COLLECTION_DISPLAY || "20-原料-家宽-美国Edge上游";
 const roleSubName = process.env.EDGE_ROLE_SUB || "edge-us-roles";
-const roleSubDisplay = process.env.EDGE_ROLE_SUB_DISPLAY || "US Edge roles";
+const roleSubDisplay = process.env.EDGE_ROLE_SUB_DISPLAY || "40-稳定角色-美国Edge家宽";
 
 function readStdin() {
   return fs.readFileSync(0, "utf8").trim();
@@ -56,7 +56,7 @@ function ensureUpstreamSub(data, name, displayName, upstreamUri) {
       ua: "",
       mergeSources: "",
       passThroughUA: false,
-      ignoreFailedRemoteSub: false,
+      ignoreFailedRemoteSub: true,
       isIconColor: true,
       icon: "",
       tag: [],
@@ -93,6 +93,10 @@ function ensureUpstreamSub(data, name, displayName, upstreamUri) {
     sub.tag = Array.isArray(sub.tag) ? sub.tag : [];
     sub.subscriptionTags = Array.isArray(sub.subscriptionTags) ? sub.subscriptionTags : [];
     sub.process = Array.isArray(sub.process) ? sub.process : [quickSettingOperator()];
+    if (isRemote && sub.ignoreFailedRemoteSub !== true) {
+      sub.ignoreFailedRemoteSub = true;
+      changed.push(`sub-ignore-failed-enabled:${name}`);
+    }
   }
   return changed;
 }
@@ -149,7 +153,7 @@ function ensureCollection(data, name, displayName, subscriptions) {
       firstSubFlow: true,
       form: "",
       icon: "",
-      ignoreFailedRemoteSub: false,
+      ignoreFailedRemoteSub: true,
       isIconColor: true,
       mergeSources: "",
       passThroughUA: false,
@@ -167,6 +171,10 @@ function ensureCollection(data, name, displayName, subscriptions) {
       col[key] = displayName;
       changed.push(`collection-display-updated:${name}`);
     }
+  }
+  if (col.ignoreFailedRemoteSub !== true) {
+    col.ignoreFailedRemoteSub = true;
+    changed.push(`collection-ignore-failed-enabled:${name}`);
   }
   col.subscriptions = Array.isArray(col.subscriptions) ? col.subscriptions : [];
   for (const subName of subscriptions) {

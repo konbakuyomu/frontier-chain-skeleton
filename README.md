@@ -12,10 +12,25 @@ VPS/Sub-Store 三端订阅中心的公开源码层。当前生产主链是：
 Shadowrocket(iOS)
   -> shadowrocket.conf 配置订阅
   -> ios-airports-uri?target=URI 普通机场/家宽节点订阅
-  -> ios-evoxt-hy2-shadowrocket?target=ShadowRocket Evoxt HY2 节点订阅
+  -> ios-evoxt-hy2-shadowrocket?target=ShadowRocket HY2 专用节点订阅
 ```
 
 核心边界：业务组只认识稳定的 `🏡 家宽选择`，不再引用 Frontier、ScrapeGW、VPS 链式节点、区域家宽组或任何具体供应商节点名。
+
+## Sub-Store 对象命名
+
+Sub-Store 后台只把显示名改成小白可读的分层；内部 `name`、share token、backend path、客户端订阅 URL 都不能改。
+
+| 前缀 | 含义 | 例子 |
+|---|---|---|
+| `10-原料-普通机场-*` | 普通机场上游，暂不角色化 | `10-原料-普通机场-CCR` |
+| `20-原料-家宽-*` | 家宽供应商或 edge 家宽上游 | `20-原料-家宽-美国-AT&T` |
+| `30-原料-Evoxt-HY2` | HY2 专用上游 | `30-原料-Evoxt-HY2` |
+| `40-稳定角色-*` | 客户端可消费的稳定角色节点 | `40-稳定角色-美国Edge家宽` |
+| `80/81/82-输出-*` | 三端最终输出 | `80-输出-Sparkle-FlClash-OpenClash-最终配置` |
+| `99-历史禁用-*` | 保留追溯但不进日常输出 | `99-历史禁用-VPS-LA-*` |
+
+家宽 remote 上游默认启用失败隔离：供应商拉取失败时后台验证会提示，但 final Mihomo 和 Shadowrocket 普通节点订阅不应因为单个家宽供应商失效而整体 HTTP 500。
 
 ## 当前能力
 
@@ -25,6 +40,7 @@ Shadowrocket(iOS)
 - mihomo 端新增 `🏡 家宽选择`：`select + include-all + filter` 动态吸纳家宽候选。
 - Shadowrocket 端保留双订阅模型，用 `select + policy-regex-filter` 动态列出家宽候选。
 - AI / PayPal / Google 等业务组只追加 `🏡 家宽选择`；区域家宽组只在 `🏡 家宽选择` 内部展示。
+- 家宽供应商只作为后台原料，客户端菜单稳定为 `🏡 家宽选择` / `🏡 美国家宽` / `🏡 亚太家宽` 等角色。
 
 ## 敏感信息边界
 
@@ -84,6 +100,7 @@ Remove-Item Env:\FRONTIER_RESIDENTIAL_AGGREGATOR_URL
 
 - 备份 VPS 上的 `sub-store.json`。
 - 可选新增或更新一个家宽聚合上游订阅。
+- 统一后台显示名为 `10/20/30/40/80/99` 分层，并给家宽 remote 上游启用失败隔离。
 - 默认保留目标 Sub-Store 里已有的 iOS 普通/HY2 集合组成；如果目标集合不存在，则从源集合推导普通节点池。
 - 更新 source marker、Collection 清洗脚本和 mihomo 主脚本。
 - 清理旧 `frontier_*` / `scrapegw_*` / `vps_*` Script Operator arguments。
@@ -122,8 +139,10 @@ Remove-Item Env:\FRONTIER_EXPECTED_BACKEND_PATH
 - `docker logs sub-store --tail 200` 无 `missing` / `error` / `fail` / `exception`。
 - 控制面迁移时，Sub-Store 容器 env 里的 backend path 必须匹配客户端正在使用的旧 URL path；脚本只输出长度和是否匹配。
 - 源集合和 iOS 普通集合都存在，且包含至少一个上游引用。
+- Sub-Store 后台显示名符合 `10/20/30/40/80/99` 分层；旧 VPS-LA 对象不在日常客户端集合里。
+- 家宽 remote 上游启用失败隔离；供应商失效不能拖垮最终订阅。
 - iOS 普通机场/家宽订阅 `ios-airports-uri?target=URI` 输出原生 URI，且不含 Evoxt。
-- iOS Evoxt HY2 订阅 `ios-evoxt-hy2-shadowrocket?target=ShadowRocket` 与普通 URI feed 分离；Evoxt 作为可插拔上游保留或移除。
+- iOS HY2 专用订阅 `ios-evoxt-hy2-shadowrocket?target=ShadowRocket` 与普通 URI feed 分离；内部对象名沿用旧 Evoxt 命名，但显示层按 HY2 专用输出理解。
 - 输出中没有 `[VPS->家宽]`、`[机场->家宽]`、`Frontier`、`ScrapeGW`。
 - 输出中没有伪节点、不可直连提示节点、已知超时家宽节点。
 - final mihomo YAML 含 `🏡 家宽选择`，且 profile-check 通过。
@@ -133,10 +152,30 @@ Remove-Item Env:\FRONTIER_EXPECTED_BACKEND_PATH
 Shadowrocket 仍使用双订阅：
 
 1. 配置订阅：`shadowrocket.conf` 的 commit-pinned jsDelivr URL。
-2. 普通机场/家宽节点订阅：VPS/Sub-Store 的 `ios-airports-uri?target=URI`。
-3. Evoxt HY2 节点订阅：VPS/Sub-Store 的 `ios-evoxt-hy2-shadowrocket?target=ShadowRocket`。
+2. 普通机场/家宽节点订阅：VPS/Sub-Store 的 `/download/collection/ios-airports-uri?target=URI`。
+3. HY2 专用节点订阅：VPS/Sub-Store 的 `/download/collection/ios-evoxt-hy2-shadowrocket?target=ShadowRocket`。
 
-当前 Sub-Store 的 `target=ShadowRocket` 会输出 `proxies:` YAML。Shadowrocket 对普通机场节点解析这种 YAML 时会出现通用蓝色图标、测速异常等兼容问题；但 Evoxt HY2 在 `target=URI` 下反而会出现图标/测速异常。因此 iPhone 节点订阅拆成两条：普通机场/家宽走 `target=URI`，Evoxt HY2 保持 `target=ShadowRocket`。
+客户端订阅 URL 形态必须区分 File API 和 Collection 下载口：
+
+```text
+Sparkle / FlClash / OpenClash:
+  https://<SUBSTORE_PUBLIC_HOST><BACKEND_PATH>/api/file/frontier-chain-mihomo?target=ClashMeta
+
+Shadowrocket 普通节点:
+  https://<SUBSTORE_PUBLIC_HOST><BACKEND_PATH>/download/collection/ios-airports-uri?target=URI
+
+Shadowrocket HY2 专用节点:
+  https://<SUBSTORE_PUBLIC_HOST><BACKEND_PATH>/download/collection/ios-evoxt-hy2-shadowrocket?target=ShadowRocket
+```
+
+常见误区：
+
+- 少了 backend path 前缀会返回 `404`。
+- 使用旧 `/file/<name>?token=...` 形态会命中旧兼容或旧容器，可能返回 `404/500`。
+- 把 Collection 写成 `/api/collection/<name>?target=URI` 会拿到后台 JSON 包装，不是客户端可直接导入的节点订阅。
+- FlClash / Sparkle 不能消费 `ios-airports-uri`；它们只消费 `frontier-chain-mihomo` final Mihomo YAML。
+
+当前 Sub-Store 的 `target=ShadowRocket` 会输出 `proxies:` YAML。Shadowrocket 对普通机场节点解析这种 YAML 时会出现通用蓝色图标、测速异常等兼容问题；但 HY2 节点在 `target=URI` 下反而会出现图标/测速异常。因此 iPhone 节点订阅拆成两条：普通机场/家宽走 `target=URI`，HY2 专用 feed 保持 `target=ShadowRocket`。`ios-evoxt-hy2-shadowrocket` 是历史内部名，不代表这个输出只能放 Evoxt。
 
 `shadowrocket.conf` 中的 `🏡 家宽选择` 是手动 selector。用户在这个 selector 内选择具体家宽节点；AI / PayPal 等业务组保持选中 `🏡 家宽选择` 即可。
 

@@ -39,7 +39,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if (-not $SshPort) { $SshPort = '22' }
 if (-not $SshUser) { $SshUser = 'root' }
 if (-not $SubStoreDataPath) { $SubStoreDataPath = "$SubStoreDir/data/sub-store.json" }
 
@@ -63,14 +62,16 @@ function Write-Warn2($Message) { Write-Host "[WARN] $Message" -ForegroundColor Y
 function Get-SshArgs {
   $args = @()
   if ($SshKey) { $args += @('-i', $SshKey) }
-  $args += @('-p', $SshPort, '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', "$SshUser@$SshHost")
+  if ($SshPort) { $args += @('-p', $SshPort) }
+  $args += @('-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', "$SshUser@$SshHost")
   return $args
 }
 
 function Get-ScpArgs {
   $args = @()
   if ($SshKey) { $args += @('-i', $SshKey) }
-  $args += @('-P', $SshPort, '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new')
+  if ($SshPort) { $args += @('-P', $SshPort) }
+  $args += @('-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new')
   return $args
 }
 

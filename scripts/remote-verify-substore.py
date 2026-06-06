@@ -27,6 +27,56 @@ EXCLUDE_INFO_PATTERN = re.compile(
 )
 FORBIDDEN_RUNTIME_TERMS = ["[VPS→家宽]", "[机场→家宽]", "🏠 [VPS→家宽]", "🏠 [机场→家宽]", "Frontier", "ScrapeGW"]
 OBSOLETE_ARG_PREFIXES = ("frontier_", "scrapegw_", "vps_")
+DISPLAY_TAXONOMY_TAG = "frontier-display-v2"
+RESIDENTIAL_TEXT_MARKERS = (
+    "residential",
+    "resi",
+    "home",
+    "broadband",
+    "家宽",
+    "家庭宽带",
+    "家庭住宅",
+    "住宅宽带",
+    "住宅",
+    "宽带",
+    "att",
+    "at&t",
+)
+EXPECTED_DISPLAY_NAMES = {
+    "subs": {
+        "ccrui": "10-原料-普通机场-CCR",
+        "kuma": "10-原料-普通机场-KUMA",
+        "aggregated-residential": "99-历史禁用-VPS-LA-聚合家宽原料",
+        "substore-evoxt-upstream": "30-原料-Evoxt-HY2",
+        "my-home-chain": "99-历史禁用-VPS-LA-MY家宽链式",
+        "my-home-chain-hy2": "20-原料-家宽-马来西亚-MINE-HY2",
+        "edge-us-att": "20-原料-家宽-美国-AT&T",
+        "edge-us-roles": "40-稳定角色-美国Edge家宽",
+    },
+    "collections": {
+        "merged-airports": "80-输出-三端主节点池",
+        "ios-airports-uri": "81-输出-Shadowrocket-普通节点URI",
+        "ios-evoxt-hy2-shadowrocket": "82-输出-Shadowrocket-HY2专用",
+        "edge-us-upstreams": "20-原料-家宽-美国Edge上游",
+        "user-landing-airports": "99-历史禁用-VPS-LA-链式原料池",
+    },
+    "files": {
+        "frontier-chain-mihomo": "80-输出-Sparkle-FlClash-OpenClash-最终配置",
+    },
+}
+LEGACY_VPS_LA_DAILY_EXCLUDES = {
+    "aggregated-residential",
+    "user-landing-airports",
+    "vps-chain-residential",
+    "vircs-att-vps-only",
+    "my-home-chain",
+    "测试",
+}
+CLIENT_COLLECTION_NAMES = {
+    "merged-airports",
+    "ios-airports-uri",
+    "ios-evoxt-hy2-shadowrocket",
+}
 DEFAULT_TIMEOUT_RESIDENTIAL_NAMES = [
     "cf加速|越南动态家宽🇻🇳",
     "越南-cf加速 动态 🇻🇳-家宽",
@@ -353,7 +403,30 @@ def shutil_which(name):
     return ""
 
 
-def docker_log_issue_count(container):
+def isolated_remote_subscription_names(data):
+    names = set()
+    for sub in data.get("subs", []) or []:
+        if not isinstance(sub, dict):
+            continue
+        if sub.get("source") == "remote" and sub.get("ignoreFailedRemoteSub") is True and is_residential_object(sub):
+            name = str(sub.get("name") or "")
+            if name:
+                names.add(name)
+    return names
+
+
+def tolerated_log_issue_reason(line, isolated_remote_names):
+    if "Redirect loop detected" in line and "使用 HEAD 方法从响应头获取流量信息失败" in line:
+        return "substore-head-probe-redirect-loop"
+    if "Fallback Base64 Pre-processor error: decoded line does not start with protocol" in line:
+        return "substore-parser-fallback"
+    for name in isolated_remote_names:
+        if name in line and re.search(r"(?i)error|fail|statusCode|发生错误|无法下载", line):
+            return "isolated-remote-upstream"
+    return ""
+
+
+def docker_log_issue_count(container, data):
     try:
         started_at = subprocess.check_output(
             ["docker", "inspect", "-f", "{{.State.StartedAt}}", container],
@@ -369,15 +442,25 @@ def docker_log_issue_count(container):
         )
     except Exception as exc:
         return None, str(exc)
-    sanitized_lines = []
+    isolated_names = isolated_remote_subscription_names(data)
+    issues = 0
+    fatal = 0
+    tolerated_reasons = {}
     for line in out.splitlines():
-        if "Redirect loop detected" in line and "使用 HEAD 方法从响应头获取流量信息失败" in line:
+        if not re.search(r"(?i)missing|error|fail|exception", line):
             continue
-        sanitized_lines.append(line)
-    sanitized = "\n".join(sanitized_lines)
-    hits = re.findall(r"(?i)missing|error|fail|exception", sanitized)
+        reason = tolerated_log_issue_reason(line, isolated_names)
+        if reason:
+            tolerated_reasons[reason] = tolerated_reasons.get(reason, 0) + 1
+            issues += 1
+            continue
+        issues += 1
+        fatal += 1
     return {
-        "issue_count": len(hits),
+        "issue_count": issues,
+        "tolerated_issue_count": sum(tolerated_reasons.values()),
+        "fatal_issue_count": fatal,
+        "tolerated_reasons": tolerated_reasons,
         "bytes": len(out.encode("utf-8")),
     }, ""
 
@@ -538,6 +621,83 @@ def collection_subscription_names(collection):
     return [value for value in values if value]
 
 
+def display_name(item):
+    return str((item or {}).get("displayName") or (item or {}).get("display-name") or "")
+
+
+def has_any_marker(text, markers):
+    value = str(text or "").lower()
+    return any(marker.lower() in value for marker in markers)
+
+
+def is_residential_object(item):
+    searchable = " ".join(
+        str((item or {}).get(key) or "")
+        for key in ("name", "displayName", "display-name", "remark")
+    )
+    return has_any_marker(searchable, RESIDENTIAL_TEXT_MARKERS)
+
+
+def taxonomy_display_mismatches(data):
+    mismatches = []
+    for section, expected in EXPECTED_DISPLAY_NAMES.items():
+        items = data.get(section, []) or []
+        for name, want in expected.items():
+            item = find_named(items, name)
+            if not item:
+                continue
+            got = display_name(item)
+            if got != want:
+                mismatches.append({"section": section, "name": name, "got": got, "want": want})
+    return mismatches
+
+
+def missing_taxonomy_tags(data):
+    missing = []
+    for section in ("subs", "collections", "files"):
+        for item in data.get(section, []) or []:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            tags = []
+            for key in ("tag", "subscriptionTags"):
+                if isinstance(item.get(key), list):
+                    tags.extend(str(value) for value in item.get(key))
+            if DISPLAY_TAXONOMY_TAG not in tags:
+                missing.append("%s:%s" % (section, item.get("name")))
+    return missing
+
+
+def residential_remote_failure_isolation_gaps(data):
+    gaps = []
+    for sub in data.get("subs", []) or []:
+        if not isinstance(sub, dict):
+            continue
+        if sub.get("source") == "remote" and is_residential_object(sub) and sub.get("ignoreFailedRemoteSub") is not True:
+            gaps.append(str(sub.get("name") or "<unnamed>"))
+    return gaps
+
+
+def legacy_daily_collection_refs(data):
+    refs = []
+    for collection_name in CLIENT_COLLECTION_NAMES:
+        collection = find_named(data.get("collections", []), collection_name)
+        for sub_name in collection_subscription_names(collection):
+            if sub_name in LEGACY_VPS_LA_DAILY_EXCLUDES:
+                refs.append("%s:%s" % (collection_name, sub_name))
+    return refs
+
+
+def display_prefix_counts(data):
+    counts = {}
+    for section in ("subs", "collections", "files"):
+        for item in data.get(section, []) or []:
+            disp = display_name(item)
+            match = re.match(r"^(\d{2})-", disp)
+            if match:
+                counts[match.group(1)] = counts.get(match.group(1), 0) + 1
+    return counts
+
+
 def count_source_markers(subs):
     marker_count = 0
     for sub in subs:
@@ -601,11 +761,13 @@ def main():
     data = json.loads(data_path.read_text(encoding="utf-8"))
 
     checks.append(ok("docker container running", docker_running(args.container), args.container))
-    log_summary, log_error = docker_log_issue_count(args.container)
+    log_summary, log_error = docker_log_issue_count(args.container, data)
     if log_summary is None:
         checks.append(warn("docker log issue scan skipped", log_error))
+    elif log_summary["fatal_issue_count"] == 0 and log_summary["issue_count"] > 0:
+        checks.append(warn("docker logs tail has only tolerated isolated upstream/parser issues", safe_detail_dict(log_summary)))
     else:
-        checks.append(ok("docker logs tail has no missing/error/fail", log_summary["issue_count"] == 0, safe_detail_dict(log_summary)))
+        checks.append(ok("docker logs tail has no fatal missing/error/fail", log_summary["fatal_issue_count"] == 0, safe_detail_dict(log_summary)))
     checks.append(ok("sub-store.json schemaVersion", data.get("schemaVersion") == "2.0", str(data.get("schemaVersion"))))
 
     subs = data.get("subs", []) or []
@@ -614,6 +776,31 @@ def main():
     checks.append(ok("upstream subscriptions exist", len(subs) >= 1, "count=" + str(len(subs))))
     checks.append(ok("collection exists", collection is not None, args.collection))
     checks.append(ok("mihomo file exists", file_item is not None, args.file))
+    display_mismatches = taxonomy_display_mismatches(data)
+    missing_taxonomy = missing_taxonomy_tags(data)
+    residential_isolation_gaps = residential_remote_failure_isolation_gaps(data)
+    legacy_refs = legacy_daily_collection_refs(data)
+    checks.append(ok(
+        "Sub-Store display taxonomy matches stable names",
+        not display_mismatches,
+        safe_detail_dict({"mismatches": display_mismatches[:10], "count": len(display_mismatches)}),
+    ))
+    checks.append(ok(
+        "Sub-Store display taxonomy tag present",
+        not missing_taxonomy,
+        safe_detail_dict({"missing": missing_taxonomy[:10], "count": len(missing_taxonomy)}),
+    ))
+    checks.append(ok(
+        "residential remote upstreams ignore failed fetches",
+        not residential_isolation_gaps,
+        safe_detail_dict({"gaps": residential_isolation_gaps}),
+    ))
+    checks.append(ok(
+        "legacy VPS-LA objects are not in daily client collections",
+        not legacy_refs,
+        safe_detail_dict({"refs": legacy_refs}),
+    ))
+    checks.append(warn("Sub-Store display prefix counts", safe_detail_dict(display_prefix_counts(data))))
 
     if collection:
         collection_subs = collection_subscription_names(collection)
@@ -717,11 +904,11 @@ def main():
             try:
                 ios_hy2 = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=ShadowRocket" % args.ios_hy2_collection)
                 http["ios_evoxt_hy2_shadowrocket"] = analyze_ios_hy2_shadowrocket_output(ios_hy2)
-                checks.append(ok("iOS Evoxt HY2 collection is YAML for Shadowrocket", http["ios_evoxt_hy2_shadowrocket"]["has_yaml_shape"]))
+                checks.append(ok("iOS HY2 collection is YAML for Shadowrocket", http["ios_evoxt_hy2_shadowrocket"]["has_yaml_shape"]))
                 checks.append(ok("iOS HY2 collection meets minimum node count", http["ios_evoxt_hy2_shadowrocket"]["proxy_count"] >= args.min_ios_hy2_nodes, str(http["ios_evoxt_hy2_shadowrocket"]["proxy_count"])))
                 checks.append(ok("iOS HY2 collection only has hysteria2 nodes when present", http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"] == http["ios_evoxt_hy2_shadowrocket"]["proxy_count"], "hy2=%s total=%s" % (http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"], http["ios_evoxt_hy2_shadowrocket"]["proxy_count"])))
             except Exception as exc:
-                checks.append(warn("iOS Evoxt HY2 collection fetch skipped", str(exc)))
+                checks.append(warn("iOS HY2 collection fetch skipped", str(exc)))
             try:
                 final = fetch_local(args.local_base_url, backend_path, "/api/file/%s?target=mihomo" % args.file)
                 http["final_mihomo"] = analyze_mihomo_output(final)

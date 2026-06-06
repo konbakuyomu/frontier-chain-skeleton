@@ -41,7 +41,7 @@ param(
   [string]$MihomoFileName = 'frontier-chain-mihomo',
   [string]$ResidentialAggregatorUrl = $env:FRONTIER_RESIDENTIAL_AGGREGATOR_URL,
   [string]$ResidentialAggregatorName = 'aggregated-residential',
-  [string]$ResidentialAggregatorDisplayName = '家宽聚合订阅',
+  [string]$ResidentialAggregatorDisplayName = '20-原料-家宽-聚合',
   [string]$ResidentialAggregatorSourcePrefix = 'AGG',
   [string]$IosAirportsSubscriptions = $env:FRONTIER_IOS_AIRPORTS_SUBSCRIPTIONS,
   [string]$IosHy2Subscriptions = $env:FRONTIER_IOS_HY2_SUBSCRIPTIONS,
@@ -51,7 +51,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if (-not $SshPort) { $SshPort = '22' }
 if (-not $SshUser) { $SshUser = 'root' }
 if (-not $SubStoreDataPath) { $SubStoreDataPath = "$SubStoreDir/data/sub-store.json" }
 if (-not $SubStoreBackupDir) { $SubStoreBackupDir = "$SubStoreDir/backups" }
@@ -101,14 +100,16 @@ function Get-SelectedTargets {
 function Get-SshArgs {
   $args = @()
   if ($SshKey) { $args += @('-i', $SshKey) }
-  $args += @('-p', $SshPort, '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', "$SshUser@$SshHost")
+  if ($SshPort) { $args += @('-p', $SshPort) }
+  $args += @('-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', "$SshUser@$SshHost")
   return $args
 }
 
 function Get-ScpArgs {
   $args = @()
   if ($SshKey) { $args += @('-i', $SshKey) }
-  $args += @('-P', $SshPort, '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new')
+  if ($SshPort) { $args += @('-P', $SshPort) }
+  $args += @('-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new')
   return $args
 }
 
