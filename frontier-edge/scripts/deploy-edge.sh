@@ -78,7 +78,9 @@ EDGE_INGRESS_MODE="${EDGE_INGRESS_MODE:-caddy}"
 EDGE_OPENRESTY_CONTAINER="${EDGE_OPENRESTY_CONTAINER:-1Panel-openresty-kOZu}"
 EDGE_OPENRESTY_CONF_DIR="${EDGE_OPENRESTY_CONF_DIR:-/opt/1panel/apps/openresty/openresty/conf/conf.d}"
 EDGE_OPENRESTY_CONF_NAME="${EDGE_OPENRESTY_CONF_NAME:-${EDGE_PUBLIC_HOST}.conf}"
+EDGE_ENABLE_HY2="${EDGE_ENABLE_HY2:-0}"
 REQUIRED_LOCAL_PORTS=""
+REQUIRED_UDP_PORTS=""
 SSH_ARGS=(-o BatchMode=yes)
 if [ -n "${SSH_PORT:-}" ]; then
   SSH_ARGS+=(-p "$SSH_PORT")
@@ -106,6 +108,20 @@ python3 "$EDGE_DIR/generate.py" "${GEN_ENV_ARGS[@]}" --out-dir "$OUT_DIR"
 [ -f "$OUT_DIR/compose.yaml" ] || { echo "ERROR: compose.yaml was not generated" >&2; exit 1; }
 [ -f "$OUT_DIR/mihomo/config.yaml" ] || { echo "ERROR: mihomo/config.yaml was not generated" >&2; exit 1; }
 [ -f "$OUT_DIR/vmess-bundle.txt" ] || { echo "ERROR: vmess-bundle.txt was not generated" >&2; exit 1; }
+if [ "$EDGE_ENABLE_HY2" = "1" ]; then
+  [ -f "$OUT_DIR/hy2-bundle.txt" ] || { echo "ERROR: hy2-bundle.txt was not generated" >&2; exit 1; }
+  REQUIRED_UDP_PORTS="$(
+    python3 - "$OUT_DIR/compose.yaml" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+ports = sorted({int(match.group(1)) for match in re.finditer(r'"(\d+):\d+/udp"', text)})
+print(" ".join(str(port) for port in ports))
+PY
+  )"
+fi
 if [ "$EDGE_INGRESS_MODE" = "openresty" ]; then
   [ -f "$OUT_DIR/openresty/$EDGE_OPENRESTY_CONF_NAME" ] || { echo "ERROR: OpenResty config was not generated" >&2; exit 1; }
   REQUIRED_LOCAL_PORTS="$(
@@ -126,8 +142,8 @@ else
 fi
 
 echo
-echo "[3/5] Remote preflight on $SSH_TARGET..."
-REMOTE_PREFLIGHT_CMD="REMOTE_DIR=$(shell_quote "$REMOTE_DIR") EDGE_INGRESS_MODE=$(shell_quote "$EDGE_INGRESS_MODE") EDGE_PUBLIC_HOST=$(shell_quote "$EDGE_PUBLIC_HOST") PATCH_SUBSTORE=$(shell_quote "$PATCH_SUBSTORE") REQUIRED_LOCAL_PORTS=$(shell_quote "$REQUIRED_LOCAL_PORTS") EDGE_ALLOW_REPLACE_INGRESS=$(shell_quote "${EDGE_ALLOW_REPLACE_INGRESS:-0}") EDGE_STOP_SERVICES=$(shell_quote "${EDGE_STOP_SERVICES:-}") EDGE_OPENRESTY_CONTAINER=$(shell_quote "$EDGE_OPENRESTY_CONTAINER") EDGE_OPENRESTY_CONF_DIR=$(shell_quote "$EDGE_OPENRESTY_CONF_DIR") EDGE_OPENRESTY_CONF_NAME=$(shell_quote "$EDGE_OPENRESTY_CONF_NAME") bash -s"
+echo "[3/5] Remote preflight..."
+REMOTE_PREFLIGHT_CMD="REMOTE_DIR=$(shell_quote "$REMOTE_DIR") EDGE_INGRESS_MODE=$(shell_quote "$EDGE_INGRESS_MODE") EDGE_PUBLIC_HOST=$(shell_quote "$EDGE_PUBLIC_HOST") PATCH_SUBSTORE=$(shell_quote "$PATCH_SUBSTORE") REQUIRED_LOCAL_PORTS=$(shell_quote "$REQUIRED_LOCAL_PORTS") REQUIRED_UDP_PORTS=$(shell_quote "$REQUIRED_UDP_PORTS") EDGE_ENABLE_HY2=$(shell_quote "$EDGE_ENABLE_HY2") EDGE_ALLOW_REPLACE_INGRESS=$(shell_quote "${EDGE_ALLOW_REPLACE_INGRESS:-0}") EDGE_STOP_SERVICES=$(shell_quote "${EDGE_STOP_SERVICES:-}") EDGE_OPENRESTY_CONTAINER=$(shell_quote "$EDGE_OPENRESTY_CONTAINER") EDGE_OPENRESTY_CONF_DIR=$(shell_quote "$EDGE_OPENRESTY_CONF_DIR") EDGE_OPENRESTY_CONF_NAME=$(shell_quote "$EDGE_OPENRESTY_CONF_NAME") EDGE_OPENRESTY_CERTIFICATE=$(shell_quote "${EDGE_OPENRESTY_CERTIFICATE:-}") EDGE_OPENRESTY_CERTIFICATE_KEY=$(shell_quote "${EDGE_OPENRESTY_CERTIFICATE_KEY:-}") bash -s"
 ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "$REMOTE_PREFLIGHT_CMD" <<'REMOTE'
 set -euo pipefail
 
@@ -145,6 +161,18 @@ else
   exit 1
 fi
 
+for port in ${REQUIRED_UDP_PORTS:-}; do
+  if ss -lunH "sport = :$port" | grep -q .; then
+    if docker ps --format '{{.Names}}' | grep -qx 'frontier-edge-mihomo' && \
+      docker port frontier-edge-mihomo 2>/dev/null | grep -Eq "^${port}/udp -> .*:${port}$"; then
+      continue
+    fi
+    echo "ERROR: required HY2 UDP port is already busy: $port" >&2
+    ss -lunp "sport = :$port" 2>/dev/null || true
+    exit 3
+  fi
+done
+
 if [ "${EDGE_INGRESS_MODE:-caddy}" = "openresty" ]; then
   if ! docker ps --format '{{.Names}}' | grep -qx "$EDGE_OPENRESTY_CONTAINER"; then
     echo "ERROR: OpenResty container is not running: $EDGE_OPENRESTY_CONTAINER" >&2
@@ -154,6 +182,14 @@ if [ "${EDGE_INGRESS_MODE:-caddy}" = "openresty" ]; then
   if [ ! -d "$EDGE_OPENRESTY_CONF_DIR" ]; then
     echo "ERROR: OpenResty conf dir not found: $EDGE_OPENRESTY_CONF_DIR" >&2
     exit 3
+  fi
+  if [ "${EDGE_ENABLE_HY2:-0}" = "1" ]; then
+    for cert_path in "${EDGE_OPENRESTY_CERTIFICATE:-}" "${EDGE_OPENRESTY_CERTIFICATE_KEY:-}"; do
+      if [ -z "$cert_path" ] || ! docker exec "$EDGE_OPENRESTY_CONTAINER" test -r "$cert_path"; then
+        echo "ERROR: HY2 is enabled but OpenResty certificate path is not readable in container." >&2
+        exit 3
+      fi
+    done
   fi
   case "$EDGE_OPENRESTY_CONF_NAME" in
     */*|*.tmp|*~)
@@ -248,17 +284,23 @@ REMOTE
 
 echo
 echo "[4/5] Upload artifacts..."
+TAR_ITEMS=(compose.yaml mihomo vmess-bundle.txt)
+if [ "$EDGE_ENABLE_HY2" = "1" ]; then
+  TAR_ITEMS+=(hy2-bundle.txt)
+fi
 if [ "$EDGE_INGRESS_MODE" = "openresty" ]; then
-  tar -C "$OUT_DIR" -cz compose.yaml mihomo vmess-bundle.txt openresty \
+  TAR_ITEMS+=(openresty)
+  tar -C "$OUT_DIR" -cz "${TAR_ITEMS[@]}" \
     | ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "tar -xzf - -C '$REMOTE_DIR'"
 else
-  tar -C "$OUT_DIR" -cz compose.yaml Caddyfile mihomo vmess-bundle.txt \
+  TAR_ITEMS+=(Caddyfile)
+  tar -C "$OUT_DIR" -cz "${TAR_ITEMS[@]}" \
     | ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "tar -xzf - -C '$REMOTE_DIR'"
 fi
 
 echo
 echo "[5/5] Start edge appliance..."
-REMOTE_START_CMD="REMOTE_DIR=$(shell_quote "$REMOTE_DIR") EDGE_INGRESS_MODE=$(shell_quote "$EDGE_INGRESS_MODE") EDGE_ALLOW_REPLACE_INGRESS=$(shell_quote "${EDGE_ALLOW_REPLACE_INGRESS:-0}") EDGE_STOP_SERVICES=$(shell_quote "${EDGE_STOP_SERVICES:-}") EDGE_OPENRESTY_CONTAINER=$(shell_quote "$EDGE_OPENRESTY_CONTAINER") EDGE_OPENRESTY_CONF_DIR=$(shell_quote "$EDGE_OPENRESTY_CONF_DIR") EDGE_OPENRESTY_CONF_NAME=$(shell_quote "$EDGE_OPENRESTY_CONF_NAME") bash -s"
+REMOTE_START_CMD="REMOTE_DIR=$(shell_quote "$REMOTE_DIR") EDGE_INGRESS_MODE=$(shell_quote "$EDGE_INGRESS_MODE") EDGE_ENABLE_HY2=$(shell_quote "$EDGE_ENABLE_HY2") EDGE_ALLOW_REPLACE_INGRESS=$(shell_quote "${EDGE_ALLOW_REPLACE_INGRESS:-0}") EDGE_STOP_SERVICES=$(shell_quote "${EDGE_STOP_SERVICES:-}") EDGE_OPENRESTY_CONTAINER=$(shell_quote "$EDGE_OPENRESTY_CONTAINER") EDGE_OPENRESTY_CONF_DIR=$(shell_quote "$EDGE_OPENRESTY_CONF_DIR") EDGE_OPENRESTY_CONF_NAME=$(shell_quote "$EDGE_OPENRESTY_CONF_NAME") EDGE_OPENRESTY_CERTIFICATE=$(shell_quote "${EDGE_OPENRESTY_CERTIFICATE:-}") EDGE_OPENRESTY_CERTIFICATE_KEY=$(shell_quote "${EDGE_OPENRESTY_CERTIFICATE_KEY:-}") bash -s"
 ssh "${SSH_ARGS[@]}" "$SSH_TARGET" "$REMOTE_START_CMD" <<'REMOTE'
 set -euo pipefail
 cd "$REMOTE_DIR"
@@ -291,6 +333,12 @@ else
 fi
 
 if [ "${EDGE_INGRESS_MODE:-caddy}" = "openresty" ]; then
+  if [ "${EDGE_ENABLE_HY2:-0}" = "1" ]; then
+    mkdir -p "$REMOTE_DIR/mihomo/certs"
+    docker cp "$EDGE_OPENRESTY_CONTAINER:$EDGE_OPENRESTY_CERTIFICATE" "$REMOTE_DIR/mihomo/certs/hy2-fullchain.pem" >/dev/null
+    docker cp "$EDGE_OPENRESTY_CONTAINER:$EDGE_OPENRESTY_CERTIFICATE_KEY" "$REMOTE_DIR/mihomo/certs/hy2-privkey.pem" >/dev/null
+    chmod 600 "$REMOTE_DIR/mihomo/certs/hy2-fullchain.pem" "$REMOTE_DIR/mihomo/certs/hy2-privkey.pem"
+  fi
   docker run --rm \
     -v "$REMOTE_DIR/mihomo:/root/.config/mihomo:ro" \
     metacubex/mihomo:latest -t -d /root/.config/mihomo -f /root/.config/mihomo/config.yaml >/dev/null

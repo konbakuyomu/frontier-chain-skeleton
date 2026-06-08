@@ -52,6 +52,7 @@ EXPECTED_DISPLAY_NAMES = {
         "my-home-chain-hy2": "20-原料-家宽-马来西亚-MINE-HY2",
         "edge-us-att": "20-原料-家宽-美国-AT&T",
         "edge-us-roles": "40-稳定角色-美国Edge家宽",
+        "edge-us-hy2-roles": "40-稳定角色-美国Edge-HY2",
     },
     "collections": {
         "merged-airports": "80-输出-三端主节点池",
@@ -346,6 +347,7 @@ def analyze_ios_hy2_shadowrocket_output(text):
         "bytes": len(text.encode("utf-8")),
         "proxy_count": len(proxies),
         "evoxt_count": sum(1 for name in names if "L1-EVOXT" in name),
+        "us_edge_hy2_count": sum(1 for name in names if re.search(r"US-Edge\s*\|.*-HY2", name, re.I)),
         "hysteria2_count": sum(1 for proxy_type in types if proxy_type == "hysteria2"),
         "has_yaml_shape": text.lstrip().startswith("proxies:"),
         "forbidden_counts": forbidden_counts(text),
@@ -474,6 +476,8 @@ def analyze_mihomo_output(text):
     rule_items = extract_rules(rules)
     names = extract_proxy_names(proxies)
     evoxt_blocks = [block for block in extract_proxy_blocks(proxies) if "L1-EVOXT" in block]
+    us_edge_blocks = [block for block in extract_proxy_blocks(proxies) if "US-Edge |" in block]
+    us_edge_hy2_blocks = [block for block in us_edge_blocks if re.search(r"US-Edge\s*\|.*-HY2", block, re.I)]
     quality = name_quality(names)
     quality.update({
         "bytes": len(text.encode("utf-8")),
@@ -490,6 +494,9 @@ def analyze_mihomo_output(text):
         "evoxt_vless_count": sum(1 for block in evoxt_blocks if proxy_block_type(block) == "vless"),
         "evoxt_reality_count": sum(1 for block in evoxt_blocks if proxy_block_is_reality(block)),
         "evoxt_malaysia_name_count": sum(1 for block in evoxt_blocks if "马来西亚" in block or "Malaysia" in block),
+        "us_edge_node_count": len(us_edge_blocks),
+        "us_edge_hy2_count": len(us_edge_hy2_blocks),
+        "us_edge_vmess_count": sum(1 for block in us_edge_blocks if proxy_block_type(block) == "vmess"),
         "has_evoxt_group": "name: Evoxt 自建" in visible_proxy_groups or "name: 'Evoxt 自建'" in visible_proxy_groups or "name: \"Evoxt 自建\"" in visible_proxy_groups,
         "evoxt_group_refs": group_body_refs(visible_proxy_groups, "Evoxt 自建", "L1-EVOXT |"),
         "evoxt_group_http_probe": group_body_refs(visible_proxy_groups, "Evoxt 自建", "http://cp.cloudflare.com/generate_204"),
@@ -628,6 +635,10 @@ def display_name(item):
 def has_any_marker(text, markers):
     value = str(text or "").lower()
     return any(marker.lower() in value for marker in markers)
+
+
+def is_us_edge_hy2_name(name):
+    return re.search(r"US-Edge\s*\|.*-HY2(?:$|-)", str(name or ""), re.I) is not None
 
 
 def is_residential_object(item):
@@ -894,9 +905,12 @@ def main():
             try:
                 ios_uri = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=URI" % args.ios_airports_collection)
                 http["ios_airports_uri"] = analyze_uri_output(ios_uri)
+                ios_uri_names = extract_proxy_names(ios_uri)
+                ios_uri_us_edge_hy2 = [name for name in ios_uri_names if is_us_edge_hy2_name(name)]
                 ios_uri_schemes = http["ios_airports_uri"]["scheme_counts"]
                 checks.append(ok("iOS airports URI collection is line-based", not http["ios_airports_uri"]["has_yaml_shape"], safe_detail_dict(ios_uri_schemes)))
-                checks.append(ok("iOS airports URI excludes Evoxt", "L1-EVOXT" not in ios_uri, str(ios_uri.count("L1-EVOXT"))))
+                checks.append(ok("iOS airports URI excludes Evoxt", not any("L1-EVOXT" in name for name in ios_uri_names), str(sum(1 for name in ios_uri_names if "L1-EVOXT" in name))))
+                checks.append(ok("iOS airports URI excludes US Edge HY2", not ios_uri_us_edge_hy2, str(len(ios_uri_us_edge_hy2))))
                 checks.append(ok("iOS airports URI has ordinary nodes", http["ios_airports_uri"]["line_count"] >= args.min_ios_ordinary_nodes, str(http["ios_airports_uri"]["line_count"])))
                 checks.append(ok("iOS airports URI keeps residential candidates", http["ios_airports_uri"]["residential_candidate_count"] > 0, str(http["ios_airports_uri"]["residential_candidate_count"])))
             except Exception as exc:
@@ -907,6 +921,10 @@ def main():
                 checks.append(ok("iOS HY2 collection is YAML for Shadowrocket", http["ios_evoxt_hy2_shadowrocket"]["has_yaml_shape"]))
                 checks.append(ok("iOS HY2 collection meets minimum node count", http["ios_evoxt_hy2_shadowrocket"]["proxy_count"] >= args.min_ios_hy2_nodes, str(http["ios_evoxt_hy2_shadowrocket"]["proxy_count"])))
                 checks.append(ok("iOS HY2 collection only has hysteria2 nodes when present", http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"] == http["ios_evoxt_hy2_shadowrocket"]["proxy_count"], "hy2=%s total=%s" % (http["ios_evoxt_hy2_shadowrocket"]["hysteria2_count"], http["ios_evoxt_hy2_shadowrocket"]["proxy_count"])))
+                checks.append(warn("iOS HY2 US Edge stats", safe_detail_dict({
+                    "us_edge_hy2_count": http["ios_evoxt_hy2_shadowrocket"]["us_edge_hy2_count"],
+                    "evoxt_count": http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"],
+                })))
             except Exception as exc:
                 checks.append(warn("iOS HY2 collection fetch skipped", str(exc)))
             try:
@@ -922,6 +940,11 @@ def main():
                     "vless_count": http["final_mihomo"]["evoxt_vless_count"],
                     "reality_count": http["final_mihomo"]["evoxt_reality_count"],
                     "malaysia_group_refs": http["final_mihomo"]["malaysia_group_evoxt_refs"],
+                })))
+                checks.append(warn("final mihomo US Edge stats", safe_detail_dict({
+                    "us_edge_node_count": http["final_mihomo"]["us_edge_node_count"],
+                    "us_edge_vmess_count": http["final_mihomo"]["us_edge_vmess_count"],
+                    "us_edge_hy2_count": http["final_mihomo"]["us_edge_hy2_count"],
                 })))
                 checks.append(ok("GLOBAL does not expose removed Evoxt shortcut group", http["final_mihomo"]["global_evoxt_refs"] == 0, str(http["final_mihomo"]["global_evoxt_refs"])))
                 checks.append(ok("final mihomo uses stable residential shortcut layer", http["final_mihomo"]["global_us_residential_refs"] > 0 or http["final_mihomo"]["global_apac_residential_refs"] > 0, "us=%s apac=%s" % (http["final_mihomo"]["global_us_residential_refs"], http["final_mihomo"]["global_apac_residential_refs"])))

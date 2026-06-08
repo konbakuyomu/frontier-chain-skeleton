@@ -496,8 +496,19 @@ function isPreservedMineHy2NodeName(name) {
   );
 }
 
+function isPreservedUsEdgeRoleName(name) {
+  return /^US-Edge\s*\|/.test(String(name || ''));
+}
+
+function isPreservedUsEdgeHy2RoleName(name) {
+  return isPreservedUsEdgeRoleName(name) && /-HY2(?:$|-)/i.test(String(name || ''));
+}
+
 function normalizeAirportNodeName(name, proxy) {
   if (!name || INFO_PSEUDO_NODE_NAME_PATTERN.test(name)) {
+    return name;
+  }
+  if (isPreservedUsEdgeRoleName(name)) {
     return name;
   }
   if (isPreservedMineHy2NodeName(name)) {
@@ -585,7 +596,8 @@ function isHy2OnlyNode(proxy) {
   var name = String((proxy && proxy.name) || '');
   return isHy2Proxy(proxy) && (
     /L1-EVOXT\s*\|/.test(name) ||
-    isPreservedMineHy2NodeName(name)
+    isPreservedMineHy2NodeName(name) ||
+    isPreservedUsEdgeHy2RoleName(name)
   );
 }
 

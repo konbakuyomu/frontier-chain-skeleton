@@ -1,0 +1,15 @@
+# role_id	mode	region	udp_port	upstream_filter	client_display_name	profile
+# mode:
+#   direct   -> this edge VPS exits directly; upstream_filter must be "-"
+#   url-test -> mihomo tests matching upstreams from edge-us-upstreams
+#   select   -> mihomo exposes a stable role backed by matching upstreams
+# profile:
+#   latency   -> default daily HY2 role; no fixed up/down or QUIC window overrides
+#   bandwidth -> conservative Brutal canary for throughput tests
+#   parked    -> keep the role documented but do not generate listener or bundle output
+#
+# Keep this file public-safe: no subscription URLs, UUIDs, tokens, backend paths, passwords, or real server IPs.
+# The latency role intentionally uses 443/udp while Caddy/OpenResty keep 443/tcp only.
+us-direct-hy2	direct	US	443	-	US-Edge | 美国-VPS直出-HY2	latency
+us-direct-hy2-bandwidth	direct	US	30443	-	US-Edge | 美国-VPS直出-HY2-带宽	bandwidth
+us-att-hy2	select	US	-	(?i)(AT&T|ATT|微信kuma|美国.*AT&T|美国.*ATT|AT&T.*家宽|ATT.*家宽)	US-Edge | 美国-AT&T家宽-HY2	parked

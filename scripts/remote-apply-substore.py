@@ -33,6 +33,7 @@ IOS_AIRPORTS_COLLECTION = "ios-airports-uri"
 IOS_AIRPORTS_DISPLAY_NAME = "81-输出-Shadowrocket-普通节点URI"
 IOS_EVOXT_HY2_COLLECTION = "ios-evoxt-hy2-shadowrocket"
 IOS_EVOXT_HY2_DISPLAY_NAME = "82-输出-Shadowrocket-HY2专用"
+EDGE_US_HY2_ROLE_SUB = "edge-us-hy2-roles"
 LEGACY_EVOXT_HY2_SUBSCRIPTION = "substore-evoxt-upstream"
 
 CLIENT_COLLECTIONS = {
@@ -184,6 +185,8 @@ def display_name_for_sub(sub):
         return "20-原料-家宽-美国-AT&T"
     if name == "edge-us-roles":
         return "40-稳定角色-美国Edge家宽"
+    if name == EDGE_US_HY2_ROLE_SUB:
+        return "40-稳定角色-美国Edge-HY2"
     if name == "aggregated-residential":
         return "99-历史禁用-VPS-LA-聚合家宽原料"
     if name == "my-home-chain":
@@ -229,6 +232,8 @@ def remark_for_item(item, section):
             return "美国 edge 的 AT&T 家宽原料；客户端只看美国 Edge 稳定角色。"
         if name == "edge-us-roles":
             return "美国 edge 生成的稳定角色节点；供主节点池和 Shadowrocket 普通节点 feed 消费。"
+        if name == EDGE_US_HY2_ROLE_SUB:
+            return "美国 edge 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。"
         if name == "my-home-chain-hy2":
             return "马来西亚 MINE 家宽 HY2 原料；可作为上游保留，客户端仍通过稳定家宽选择层消费。"
         if is_legacy_vps_la_object(item):
@@ -241,7 +246,7 @@ def remark_for_item(item, section):
         if name == IOS_AIRPORTS_COLLECTION:
             return "Shadowrocket 普通节点 URI 输出；包含普通机场和稳定家宽角色，不含 Evoxt HY2。"
         if name == IOS_EVOXT_HY2_COLLECTION:
-            return "Shadowrocket HY2 专用输出；内部名沿用旧 Evoxt 命名，不混入普通节点和美国 edge 角色。"
+            return "Shadowrocket HY2 专用输出；内部名沿用旧 Evoxt 命名，可包含 Evoxt、MINE 和美国 Edge HY2 节点。"
         if name == "edge-us-upstreams":
             return "美国 edge 家宽上游集合；只放 AT&T 和未来美国住宅上游。"
         if is_legacy_vps_la_object(item):
@@ -304,7 +309,12 @@ def resolve_ios_hy2_subscriptions(data, explicit_names):
     if existing is not None:
         return existing
     if subscription_exists(data, LEGACY_EVOXT_HY2_SUBSCRIPTION):
-        return [LEGACY_EVOXT_HY2_SUBSCRIPTION]
+        names = [LEGACY_EVOXT_HY2_SUBSCRIPTION]
+        if subscription_exists(data, EDGE_US_HY2_ROLE_SUB):
+            names.append(EDGE_US_HY2_ROLE_SUB)
+        return names
+    if subscription_exists(data, EDGE_US_HY2_ROLE_SUB):
+        return [EDGE_US_HY2_ROLE_SUB]
     return []
 
 

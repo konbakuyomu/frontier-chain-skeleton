@@ -17,6 +17,9 @@ const collectionName = process.env.EDGE_UPSTREAM_COLLECTION || "edge-us-upstream
 const collectionDisplay = process.env.EDGE_UPSTREAM_COLLECTION_DISPLAY || "20-原料-家宽-美国Edge上游";
 const roleSubName = process.env.EDGE_ROLE_SUB || "edge-us-roles";
 const roleSubDisplay = process.env.EDGE_ROLE_SUB_DISPLAY || "40-稳定角色-美国Edge家宽";
+const hy2RoleSubName = process.env.EDGE_HY2_ROLE_SUB || "edge-us-hy2-roles";
+const hy2RoleSubDisplay = process.env.EDGE_HY2_ROLE_SUB_DISPLAY || "40-稳定角色-美国Edge-HY2";
+const skipUpstream = process.env.EDGE_SKIP_UPSTREAM === "1";
 
 function readStdin() {
   return fs.readFileSync(0, "utf8").trim();
@@ -187,17 +190,21 @@ function ensureCollection(data, name, displayName, subscriptions) {
   return changed;
 }
 
-const upstreamUrl = readStdin();
-if (!upstreamUrl || !/^[a-z][a-z0-9+.-]*:\/\//i.test(upstreamUrl)) {
-  console.error("ERROR: expected one upstream URI on stdin");
-  process.exit(1);
+let upstreamUrl = "";
+if (!skipUpstream) {
+  upstreamUrl = readStdin();
+  if (!upstreamUrl || !/^[a-z][a-z0-9+.-]*:\/\//i.test(upstreamUrl)) {
+    console.error("ERROR: expected one upstream URI on stdin");
+    process.exit(1);
+  }
 }
 
 const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
 const changed = [
-  ...ensureUpstreamSub(data, upstreamName, upstreamDisplay, upstreamUrl),
+  ...(skipUpstream ? [] : ensureUpstreamSub(data, upstreamName, upstreamDisplay, upstreamUrl)),
   ...ensureLocalSub(data, roleSubName, roleSubDisplay),
-  ...ensureCollection(data, collectionName, collectionDisplay, [upstreamName]),
+  ...ensureLocalSub(data, hy2RoleSubName, hy2RoleSubDisplay),
+  ...(skipUpstream ? [] : ensureCollection(data, collectionName, collectionDisplay, [upstreamName])),
 ];
 
 const tmpPath = `${dataPath}.tmp-frontier-edge-${process.pid}`;
@@ -207,8 +214,9 @@ fs.renameSync(tmpPath, dataPath);
 console.log(JSON.stringify({
   dataFile: path.basename(dataPath),
   changed,
-  upstreamSub: upstreamName,
+  upstreamSub: skipUpstream ? "" : upstreamName,
   roleSub: roleSubName,
+  hy2RoleSub: hy2RoleSubName,
   collection: collectionName,
   subsCount: (data.subs || []).length,
   collectionsCount: (data.collections || []).length,

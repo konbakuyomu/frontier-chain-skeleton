@@ -15,6 +15,11 @@ edge-roles.tsv
   -> .secrets.local/out/compose.yaml
   -> .secrets.local/out/vmess-bundle.txt
   -> target Sub-Store local sub edge-us-roles
+edge-hy2-roles.tsv
+  -> generate.py
+  -> .secrets.local/out/mihomo/config.yaml HY2 UDP listeners
+  -> .secrets.local/out/hy2-bundle.txt
+  -> target Sub-Store local sub edge-us-hy2-roles
 ```
 
 ## Why This Exists
@@ -34,9 +39,31 @@ remains the only place where upstream residential suppliers are managed.
 | `US-Edge | 美国-VPS直出` | Exit directly from the US VPS |
 | `US-Edge | 美国-家宽自动` | url-test matching US residential upstreams |
 | `US-Edge | 美国-AT&T家宽` | stable role backed by matching AT&T upstreams |
+| `US-Edge | 美国-VPS直出-HY2` | default low-latency HY2/UDP role exiting directly from the US VPS |
+| `US-Edge | 美国-VPS直出-HY2-带宽` | conservative bandwidth-test HY2/UDP canary exiting directly from the US VPS |
+| `US-Edge | 美国-AT&T家宽-HY2` | parked HY2/UDP role for the AT&T upstream until its whitelist is ready |
 
 Client-facing subscriptions should expose these few roles, not every raw
 supplier node.
+
+HY2 is not WebSocket traffic. It is served by Mihomo `hysteria2` UDP listeners
+and does not go through the OpenResty `location` blocks used by VMess. Existing
+`443/tcp` OpenResty/Caddy service remains unchanged; the default direct HY2 role
+uses `443/udp`, and the bandwidth canary uses the fixed high UDP port declared
+in `edge-hy2-roles.tsv`. Caddy must never publish `443/udp`.
+
+`edge-hy2-roles.tsv` has a `profile` column:
+
+| profile | behavior |
+|---|---|
+| `latency` | daily/default HY2 role; no fixed `up`/`down` or QUIC window overrides |
+| `bandwidth` | conservative Brutal canary; client-side target `up=100 Mbps`, `down=500 Mbps`, with larger QUIC receive windows |
+| `parked` | documented role only; no listener, compose port, or client bundle output |
+
+The bandwidth profile writes server listener bandwidth in server-side direction
+(`up=500 Mbps`, `down=100 Mbps`) and client bundle bandwidth in client-side
+direction (`up=100 Mbps`, `down=500 Mbps`). Do not raise this to a nominal
+`1 Gbps` without A/B evidence from Sparkle and server drop/CPU counters.
 
 ## One-Time Target Sub-Store Setup
 
@@ -46,10 +73,13 @@ Create these objects manually in the target Sub-Store Web panel:
 |---|---|---|
 | `edge-us-upstreams` | Collection | AT&T SS and future US residential upstreams |
 | `edge-us-roles` | Local sub | Generated US edge role vmess links |
+| `edge-us-hy2-roles` | Local sub | Generated US edge HY2 role YAML |
 
 Add `edge-us-roles` to the normal node collection used by Sparkle / FlClash /
-OpenClash and Shadowrocket's ordinary `target=URI` feed. Do not add it to the
-Evoxt HY2 Shadowrocket feed.
+OpenClash and Shadowrocket's ordinary `target=URI` feed. Add
+`edge-us-hy2-roles` to the normal node collection and to the Shadowrocket HY2
+feed collection. Do not add `edge-us-hy2-roles` to Shadowrocket's ordinary URI
+feed.
 
 Keep `edge-us-upstreams` narrow: only put US residential upstreams intended for
 this edge in it. The `美国-家宽自动` role uses the whole collection, while the
@@ -59,9 +89,16 @@ The AT&T SS URI belongs only in the `edge-us-upstreams` runtime collection. If
 Sub-Store keeps the upstream display name as `微信kuma`, the default
 `US-Edge | 美国-AT&T家宽` role already matches it; if the supplier renames the
 node later, update only `edge-roles.tsv`, regenerate, and patch `edge-us-roles`.
+The AT&T HY2 role stays `parked` in `edge-hy2-roles.tsv` while the upstream
+whitelist is unavailable; do not expose it to clients until a separate
+data-plane test passes.
 
 Do not use `POST /api/subs`. New local subs are created in the Web panel; scripts
 only `PATCH /api/sub/<existing>`.
+
+The Shadowrocket HY2 collection keeps the historical internal name
+`ios-evoxt-hy2-shadowrocket`, but its meaning is HY2-only Shadowrocket feed. It
+may contain Evoxt, MINE, and US Edge HY2 nodes after validation.
 
 ## Local Render
 
@@ -89,6 +126,17 @@ python3 frontier-edge/generate.py \
   --env-file frontier-edge/.secrets.local/edge-us.env \
   --env-file frontier-edge/.secrets.local/edge-us-openresty.override.env
 ```
+
+To render HY2 candidates, set these only in private env files:
+
+```env
+EDGE_ENABLE_HY2=1
+EDGE_HY2_PASSWORD=<HY2_PASSWORD>
+EDGE_HY2_ROLE_SUB=edge-us-hy2-roles
+```
+
+Generated `hy2-bundle.txt` is a ClashMeta/Mihomo YAML snippet for Sub-Store
+local sub content. It is private generated output and must not be committed.
 
 ## Same-VPS Lab Mode
 
@@ -153,6 +201,11 @@ Before patching the target Sub-Store, the deployer requires `EDGE_PUBLIC_HOST` t
 to the target VPS public IP from that VPS. If DNS is not ready, deploy without
 `--patch-substore` and verify internally first.
 
+When `EDGE_ENABLE_HY2=1`, the deployer also checks all generated UDP ports. If
+`443/udp` or the fixed high UDP port is already busy and not owned by the
+existing `frontier-edge-mihomo` container, deployment stops. Identify the owner
+before changing any service.
+
 ## Deploy
 
 Before the first SSH operation, handle any `REMOTE HOST IDENTIFICATION HAS
@@ -178,7 +231,8 @@ bash frontier-edge/scripts/deploy-edge.sh \
 ```
 
 After the target Web panel has `edge-us-roles` and `edge-us-upstreams`, patch the role
-bundle into the existing local sub:
+bundle into the existing local sub. If HY2 is enabled and `edge-us-hy2-roles`
+exists, the same command patches both local subs:
 
 ```bash
 bash frontier-edge/scripts/deploy-edge.sh \
@@ -206,6 +260,7 @@ docker compose -f compose.yaml config
 docker compose -f compose.yaml ps
 docker logs frontier-edge-mihomo --tail=80
 docker exec 1Panel-openresty-kOZu openresty -t
+ss -H -tulpen | grep -E ':(443|30443)\b'
 
 # From a client or test host
 # 1. refresh the final mihomo subscription
@@ -217,8 +272,14 @@ Expected behavior:
 
 - `美国-VPS直出` exits as the US VPS ISP.
 - `美国-AT&T家宽` exits through the AT&T or supplier residential upstream, not the VPS IP.
+- `美国-VPS直出-HY2` uses `443/udp` and remains the default low-latency HY2 role.
+- `美国-VPS直出-HY2-带宽` uses the high UDP port and is tested only for throughput.
+- `美国-AT&T家宽-HY2` does not appear while its profile is `parked`.
 - `美国-家宽自动` selects a real residential upstream. Do not add a direct sentinel
   to this `url-test`; direct is treated as zero delay and will always win.
+- `ios-airports-uri?target=URI` must not include `US-Edge | *-HY2`.
+- `ios-evoxt-hy2-shadowrocket?target=ShadowRocket` must contain only
+  `hysteria2` nodes when non-empty.
 
 ## Boundaries
 
