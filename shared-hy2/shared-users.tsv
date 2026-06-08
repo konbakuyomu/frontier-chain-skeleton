@@ -1,0 +1,5 @@
+# user_id	udp_port	stats_port	display_name	enabled
+# Keep this file public-safe: no passwords, tokens, IPs, domains, or generated links.
+u01	33443	33501	San Jose Shared HY2 u01	1
+u02	33444	33502	San Jose Shared HY2 u02	1
+u03	33445	33503	San Jose Shared HY2 u03	1

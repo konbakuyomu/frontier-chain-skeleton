@@ -7,3 +7,4 @@ __pycache__/
 .secrets.local/
 vps-relay/.secrets.local/
 frontier-edge/.secrets.local/
+shared-hy2/.secrets.local/
