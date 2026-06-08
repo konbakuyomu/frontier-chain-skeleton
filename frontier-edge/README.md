@@ -41,7 +41,8 @@ remains the only place where upstream residential suppliers are managed.
 | `US-Edge | 美国-AT&T家宽` | stable role backed by matching AT&T upstreams |
 | `US-Edge | 美国-VPS直出-HY2` | default low-latency HY2/UDP role exiting directly from the US VPS |
 | `US-Edge | 美国-VPS直出-HY2-带宽` | conservative bandwidth-test HY2/UDP canary exiting directly from the US VPS |
-| `US-Edge | 美国-AT&T家宽-HY2` | parked HY2/UDP role for the AT&T upstream until its whitelist is ready |
+| `US-Edge | 美国-AT&T家宽-HY2` | low-latency HY2/UDP role using the AT&T upstream |
+| `US-Edge | 美国-AT&T家宽-HY2-带宽` | conservative bandwidth-test HY2/UDP canary using the AT&T upstream |
 
 Client-facing subscriptions should expose these few roles, not every raw
 supplier node.
@@ -49,8 +50,8 @@ supplier node.
 HY2 is not WebSocket traffic. It is served by Mihomo `hysteria2` UDP listeners
 and does not go through the OpenResty `location` blocks used by VMess. Existing
 `443/tcp` OpenResty/Caddy service remains unchanged; the default direct HY2 role
-uses `443/udp`, and the bandwidth canary uses the fixed high UDP port declared
-in `edge-hy2-roles.tsv`. Caddy must never publish `443/udp`.
+uses `443/udp`, and the other HY2 roles use the fixed UDP ports declared in
+`edge-hy2-roles.tsv`. Caddy must never publish `443/udp`.
 
 `edge-hy2-roles.tsv` has a `profile` column:
 
@@ -89,9 +90,10 @@ The AT&T SS URI belongs only in the `edge-us-upstreams` runtime collection. If
 Sub-Store keeps the upstream display name as `微信kuma`, the default
 `US-Edge | 美国-AT&T家宽` role already matches it; if the supplier renames the
 node later, update only `edge-roles.tsv`, regenerate, and patch `edge-us-roles`.
-The AT&T HY2 role stays `parked` in `edge-hy2-roles.tsv` while the upstream
-whitelist is unavailable; do not expose it to clients until a separate
-data-plane test passes.
+The AT&T HY2 roles require the same upstream to be reachable from this VPS. If
+the supplier whitelist is removed or the upstream fails, park the AT&T HY2 rows
+in `edge-hy2-roles.tsv`, regenerate, and patch `edge-us-hy2-roles` before
+clients refresh.
 
 Do not use `POST /api/subs`. New local subs are created in the Web panel; scripts
 only `PATCH /api/sub/<existing>`.
@@ -260,7 +262,7 @@ docker compose -f compose.yaml config
 docker compose -f compose.yaml ps
 docker logs frontier-edge-mihomo --tail=80
 docker exec 1Panel-openresty-kOZu openresty -t
-ss -H -tulpen | grep -E ':(443|30443)\b'
+ss -H -tulpen | grep -E ':(443|30443|31443|32443)\b'
 
 # From a client or test host
 # 1. refresh the final mihomo subscription
@@ -274,7 +276,8 @@ Expected behavior:
 - `美国-AT&T家宽` exits through the AT&T or supplier residential upstream, not the VPS IP.
 - `美国-VPS直出-HY2` uses `443/udp` and remains the default low-latency HY2 role.
 - `美国-VPS直出-HY2-带宽` uses the high UDP port and is tested only for throughput.
-- `美国-AT&T家宽-HY2` does not appear while its profile is `parked`.
+- `美国-AT&T家宽-HY2` exits through the AT&T upstream over the HY2 first hop.
+- `美国-AT&T家宽-HY2-带宽` is tested only for throughput and may show more jitter.
 - `美国-家宽自动` selects a real residential upstream. Do not add a direct sentinel
   to this `url-test`; direct is treated as zero delay and will always win.
 - `ios-airports-uri?target=URI` must not include `US-Edge | *-HY2`.
