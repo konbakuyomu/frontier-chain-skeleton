@@ -6,9 +6,9 @@ const proxies = [
   { name: 'MALAYSIA-3X anything HY2', type: 'hysteria2', __sourcePrefix: 'MALAYSIA-3X' },
   { name: 'OLD-US-3X | legacy vless label', type: 'vless' },
   { name: 'OLD-US-3X | legacy HY2 label', type: 'hysteria2' },
-  { name: 'EDGE-US | 美国-VPS直出', type: 'vmess' },
-  { name: 'EDGE-US | 美国-VPS直出-HY2', type: 'hysteria2' },
-  { name: 'EDGE-US | 美国-VPS直出-HY2-带宽', type: 'hysteria2' },
+  { name: 'SJC-ROUTE | 美国-AT&T家宽', type: 'vmess' },
+  { name: 'SJC-ROUTE | 美国-VPS直出-HY2-带宽', type: 'hysteria2' },
+  { name: 'SJC-ROUTE | 美国-AT&T家宽-HY2', type: 'hysteria2' },
 ];
 
 const normalized = injector.normalizeAirportProxies(proxies);
@@ -19,9 +19,9 @@ assert.deepStrictEqual(names, [
   'MALAYSIA-3X | 马来西亚-HY2',
   'OLD-US-3X | 美国旧机-VLESS',
   'OLD-US-3X | 美国旧机-HY2',
-  'EDGE-US | 美国-VPS直出',
-  'EDGE-US | 美国-VPS直出-HY2',
-  'EDGE-US | 美国-VPS直出-HY2-带宽',
+  'SJC-ROUTE | 美国-AT&T家宽',
+  'SJC-ROUTE | 美国-VPS直出-HY2-带宽',
+  'SJC-ROUTE | 美国-AT&T家宽-HY2',
 ]);
 
 assert.strictEqual(injector.isHy2OnlyNode(normalized[0]), false);

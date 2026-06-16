@@ -54,8 +54,8 @@ EXPECTED_DISPLAY_NAMES = {
         "edge-us-roles": "40-稳定角色-美国Edge家宽",
         "edge-us-hy2-roles": "40-稳定角色-美国Edge-HY2",
         "edge-us-v2-att": "20-原料-家宽-美国-AT&T-v2",
-        "edge-us-v2-roles": "40-稳定角色-EDGE-US-v2-VMess",
-        "edge-us-v2-hy2-roles": "40-稳定角色-EDGE-US-v2-HY2",
+        "edge-us-v2-roles": "40-稳定角色-SJC-ROUTE-VMess",
+        "edge-us-v2-hy2-roles": "40-稳定角色-SJC-ROUTE-HY2",
         "sjc-3x": "20-原料-3x-ui-美国-SJC",
         "malaysia-3x": "20-原料-3x-ui-马来西亚",
         "old-us-3x": "20-原料-3x-ui-美国旧机",
@@ -65,7 +65,7 @@ EXPECTED_DISPLAY_NAMES = {
         "ios-airports-uri": "81-输出-Shadowrocket-普通节点URI",
         "ios-evoxt-hy2-shadowrocket": "82-输出-Shadowrocket-HY2专用",
         "edge-us-upstreams": "20-原料-家宽-美国Edge上游",
-        "edge-us-v2-upstreams": "20-原料-家宽-EDGE-US-v2上游",
+        "edge-us-v2-upstreams": "20-原料-家宽-SJC-ROUTE上游",
         "user-landing-airports": "99-历史禁用-VPS-LA-链式原料池",
     },
     "files": {
@@ -97,7 +97,8 @@ CLIENT_COLLECTION_NAMES = {
 }
 THREE_X_PREFIXES = ("SJC-3X", "MALAYSIA-3X", "OLD-US-3X")
 THREE_X_FORBIDDEN_PREFIXES = ("LAX-3X", "MY-3X")
-EDGE_US_V2_PREFIX = "EDGE-US"
+EDGE_US_V2_PREFIX = "SJC-ROUTE"
+RETIRED_VISIBLE_PREFIXES = ("EDGE-US", "US-Edge")
 DEFAULT_TIMEOUT_RESIDENTIAL_NAMES = [
     "cf加速|越南动态家宽🇻🇳",
     "越南-cf加速 动态 🇻🇳-家宽",
@@ -315,6 +316,7 @@ def analyze_collection_output(text):
             "AGG": text.count("AGG |"),
             "US_EDGE": text.count("US-Edge |"),
             "EDGE_US_V2": text.count("EDGE-US |"),
+            "SJC_ROUTE": text.count("SJC-ROUTE |"),
             "EVOXT": text.count("L1-EVOXT |"),
         },
         "forbidden_counts": forbidden_counts(text),
@@ -738,6 +740,15 @@ def is_edge_us_v2_vmess_name(name):
     return is_edge_us_v2_name(name) and not is_edge_us_v2_hy2_name(name)
 
 
+def retired_visible_names(names):
+    out = []
+    for name in names:
+        text = str(name or "")
+        if any(re.search(r"^%s\s*\|" % re.escape(prefix), text, re.I) for prefix in RETIRED_VISIBLE_PREFIXES):
+            out.append(text)
+    return out
+
+
 def is_three_x_name(name):
     text = str(name or "")
     return any(re.search(r"^%s\s*\|" % re.escape(prefix), text, re.I) for prefix in THREE_X_PREFIXES)
@@ -1097,6 +1108,7 @@ def main():
                 ios_uri_us_edge_hy2 = [name for name in ios_uri_names if is_us_edge_hy2_name(name)]
                 ios_uri_edge_us_v2_hy2 = [name for name in ios_uri_names if is_edge_us_v2_hy2_name(name)]
                 ios_uri_edge_us_v2_vmess = [name for name in ios_uri_names if is_edge_us_v2_vmess_name(name)]
+                ios_uri_retired_visible = retired_visible_names(ios_uri_names)
                 ios_uri_three_x_hy2 = [name for name in ios_uri_names if is_three_x_hy2_name(name)]
                 ios_uri_three_x_vless = [name for name in ios_uri_names if is_three_x_vless_name(name)]
                 ios_uri_forbidden_three_x = forbidden_three_x_names(ios_uri_names)
@@ -1104,15 +1116,16 @@ def main():
                 checks.append(ok("iOS airports URI collection is line-based", not http["ios_airports_uri"]["has_yaml_shape"], safe_detail_dict(ios_uri_schemes)))
                 checks.append(ok("iOS airports URI excludes Evoxt", not any("L1-EVOXT" in name for name in ios_uri_names), str(sum(1 for name in ios_uri_names if "L1-EVOXT" in name))))
                 checks.append(ok("iOS airports URI excludes US Edge HY2", not ios_uri_us_edge_hy2, str(len(ios_uri_us_edge_hy2))))
-                checks.append(ok("iOS airports URI excludes EDGE-US v2 HY2", not ios_uri_edge_us_v2_hy2, str(len(ios_uri_edge_us_v2_hy2))))
+                checks.append(ok("iOS airports URI excludes SJC-ROUTE HY2", not ios_uri_edge_us_v2_hy2, str(len(ios_uri_edge_us_v2_hy2))))
+                checks.append(ok("iOS airports URI excludes retired EDGE-US names", not ios_uri_retired_visible, str(len(ios_uri_retired_visible))))
                 checks.append(ok("iOS airports URI excludes 3X HY2", not ios_uri_three_x_hy2, str(len(ios_uri_three_x_hy2))))
                 checks.append(ok("iOS airports URI excludes old 3X prefixes", not ios_uri_forbidden_three_x, str(len(ios_uri_forbidden_three_x))))
-                checks.append(warn("iOS airports URI EDGE-US v2 VMess stats", safe_detail_dict({
+                checks.append(warn("iOS airports URI SJC-ROUTE VMess stats", safe_detail_dict({
                     "edge_us_v2_vmess_count": len(ios_uri_edge_us_v2_vmess),
                     "edge_us_v2_hy2_count": len(ios_uri_edge_us_v2_hy2),
                 })))
                 if args.expected_edge_us_v2_vmess is not None:
-                    checks.append(ok("iOS airports URI expected EDGE-US v2 VMess count", len(ios_uri_edge_us_v2_vmess) == args.expected_edge_us_v2_vmess, "%s" % len(ios_uri_edge_us_v2_vmess)))
+                    checks.append(ok("iOS airports URI expected SJC-ROUTE VMess count", len(ios_uri_edge_us_v2_vmess) == args.expected_edge_us_v2_vmess, "%s" % len(ios_uri_edge_us_v2_vmess)))
                 checks.append(warn("iOS airports URI 3X VLESS stats", safe_detail_dict({
                     "three_x_vless_count": len(ios_uri_three_x_vless),
                     "three_x_prefix_counts": three_x_prefix_counts(ios_uri_names),
@@ -1139,16 +1152,18 @@ def main():
                     "us_edge_hy2_count": http["ios_evoxt_hy2_shadowrocket"]["us_edge_hy2_count"],
                     "evoxt_count": http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"],
                 })))
-                checks.append(ok("iOS HY2 excludes EDGE-US v2 VMess", http["ios_evoxt_hy2_shadowrocket"]["edge_us_v2_vmess_count"] == 0, "%s" % http["ios_evoxt_hy2_shadowrocket"]["edge_us_v2_vmess_count"]))
+                ios_hy2_names = extract_proxy_names(ios_hy2)
+                checks.append(ok("iOS HY2 excludes SJC-ROUTE VMess", http["ios_evoxt_hy2_shadowrocket"]["edge_us_v2_vmess_count"] == 0, "%s" % http["ios_evoxt_hy2_shadowrocket"]["edge_us_v2_vmess_count"]))
+                checks.append(ok("iOS HY2 excludes retired EDGE-US names", not retired_visible_names(ios_hy2_names), str(len(retired_visible_names(ios_hy2_names)))))
                 if args.expected_edge_us_v2_hy2 is not None:
-                    checks.append(ok("iOS HY2 expected EDGE-US v2 HY2 count", http["ios_evoxt_hy2_shadowrocket"]["edge_us_v2_hy2_count"] == args.expected_edge_us_v2_hy2, "%s" % http["ios_evoxt_hy2_shadowrocket"]["edge_us_v2_hy2_count"]))
+                    checks.append(ok("iOS HY2 expected SJC-ROUTE HY2 count", http["ios_evoxt_hy2_shadowrocket"]["edge_us_v2_hy2_count"] == args.expected_edge_us_v2_hy2, "%s" % http["ios_evoxt_hy2_shadowrocket"]["edge_us_v2_hy2_count"]))
                 checks.append(warn("iOS HY2 3X stats", safe_detail_dict({
                     "three_x_hy2_count": http["ios_evoxt_hy2_shadowrocket"]["three_x_hy2_count"],
                     "three_x_prefix_counts": http["ios_evoxt_hy2_shadowrocket"]["three_x_prefix_counts"],
                 })))
                 if args.expected_three_x_hy2 is not None:
                     checks.append(ok("iOS HY2 expected 3X HY2 count", http["ios_evoxt_hy2_shadowrocket"]["three_x_hy2_count"] == args.expected_three_x_hy2, "%s" % http["ios_evoxt_hy2_shadowrocket"]["three_x_hy2_count"]))
-                checks.append(ok("iOS HY2 excludes old 3X prefixes", not forbidden_three_x_names(extract_proxy_names(ios_hy2)), "0"))
+                checks.append(ok("iOS HY2 excludes old 3X prefixes", not forbidden_three_x_names(ios_hy2_names), "0"))
             except Exception as exc:
                 checks.append(warn("iOS HY2 collection fetch skipped", str(exc)))
             try:
@@ -1165,7 +1180,8 @@ def main():
                     "reality_count": http["final_mihomo"]["evoxt_reality_count"],
                     "malaysia_group_refs": http["final_mihomo"]["malaysia_group_evoxt_refs"],
                 })))
-                checks.append(warn("final mihomo US Edge stats", safe_detail_dict({
+                final_names = extract_proxy_names(final)
+                checks.append(warn("final mihomo SJC-ROUTE stats", safe_detail_dict({
                     "us_edge_node_count": http["final_mihomo"]["us_edge_node_count"],
                     "us_edge_vmess_count": http["final_mihomo"]["us_edge_vmess_count"],
                     "us_edge_hy2_count": http["final_mihomo"]["us_edge_hy2_count"],
@@ -1177,10 +1193,11 @@ def main():
                     "evoxt_node_count": http["final_mihomo"]["evoxt_node_count"],
                     "us_edge_node_count": http["final_mihomo"]["us_edge_node_count"],
                 })))
+                checks.append(ok("final mihomo excludes retired EDGE-US names", not retired_visible_names(final_names), str(len(retired_visible_names(final_names)))))
                 if args.expected_edge_us_v2_vmess is not None:
-                    checks.append(ok("final mihomo expected EDGE-US v2 VMess count", http["final_mihomo"]["edge_us_v2_vmess_count"] == args.expected_edge_us_v2_vmess, "%s" % http["final_mihomo"]["edge_us_v2_vmess_count"]))
+                    checks.append(ok("final mihomo expected SJC-ROUTE VMess count", http["final_mihomo"]["edge_us_v2_vmess_count"] == args.expected_edge_us_v2_vmess, "%s" % http["final_mihomo"]["edge_us_v2_vmess_count"]))
                 if args.expected_edge_us_v2_hy2 is not None:
-                    checks.append(ok("final mihomo expected EDGE-US v2 HY2 count", http["final_mihomo"]["edge_us_v2_hy2_count"] == args.expected_edge_us_v2_hy2, "%s" % http["final_mihomo"]["edge_us_v2_hy2_count"]))
+                    checks.append(ok("final mihomo expected SJC-ROUTE HY2 count", http["final_mihomo"]["edge_us_v2_hy2_count"] == args.expected_edge_us_v2_hy2, "%s" % http["final_mihomo"]["edge_us_v2_hy2_count"]))
                 checks.append(warn("final mihomo 3X stats", safe_detail_dict({
                     "three_x_node_count": http["final_mihomo"]["three_x_node_count"],
                     "three_x_vless_count": http["final_mihomo"]["three_x_vless_count"],
@@ -1192,7 +1209,7 @@ def main():
                     checks.append(ok("final mihomo expected 3X VLESS count", http["final_mihomo"]["three_x_vless_count"] == args.expected_three_x_vless, "%s" % http["final_mihomo"]["three_x_vless_count"]))
                 if args.expected_three_x_hy2 is not None:
                     checks.append(ok("final mihomo expected 3X HY2 count", http["final_mihomo"]["three_x_hy2_count"] == args.expected_three_x_hy2, "%s" % http["final_mihomo"]["three_x_hy2_count"]))
-                checks.append(ok("final mihomo excludes old 3X prefixes", not forbidden_three_x_names(extract_proxy_names(final)), "0"))
+                checks.append(ok("final mihomo excludes old 3X prefixes", not forbidden_three_x_names(final_names), "0"))
                 checks.append(ok("GLOBAL does not expose removed Evoxt shortcut group", http["final_mihomo"]["global_evoxt_refs"] == 0, str(http["final_mihomo"]["global_evoxt_refs"])))
                 checks.append(ok("final mihomo uses stable residential shortcut layer", http["final_mihomo"]["global_us_residential_refs"] > 0 or http["final_mihomo"]["global_apac_residential_refs"] > 0, "us=%s apac=%s" % (http["final_mihomo"]["global_us_residential_refs"], http["final_mihomo"]["global_apac_residential_refs"])))
                 checks.append(ok("final mihomo uses HTTP 204 url-test probe", http["final_mihomo"]["http_probe_group_count"] > 0, str(http["final_mihomo"]["http_probe_group_count"])))

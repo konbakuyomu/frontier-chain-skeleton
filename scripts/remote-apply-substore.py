@@ -111,20 +111,20 @@ RESIDENTIAL_TEXT_MARKERS = (
 )
 DISPLAY_TAXONOMY_TAG = "frontier-display-v2"
 EDGE_US_V2_VMESS_NAMES = {
-    "US-Edge | 美国-VPS直出": "EDGE-US | 美国-VPS直出",
-    "EDGE-US | 美国-VPS直出": "EDGE-US | 美国-VPS直出",
-    "US-Edge | 美国-AT&T家宽": "EDGE-US | 美国-AT&T家宽",
-    "EDGE-US | 美国-AT&T家宽": "EDGE-US | 美国-AT&T家宽",
+    "US-Edge | 美国-AT&T家宽": "SJC-ROUTE | 美国-AT&T家宽",
+    "EDGE-US | 美国-AT&T家宽": "SJC-ROUTE | 美国-AT&T家宽",
+    "SJC-ROUTE | 美国-AT&T家宽": "SJC-ROUTE | 美国-AT&T家宽",
 }
 EDGE_US_V2_HY2_NAMES = {
-    "US-Edge | 美国-VPS直出-HY2": "EDGE-US | 美国-VPS直出-HY2",
-    "EDGE-US | 美国-VPS直出-HY2": "EDGE-US | 美国-VPS直出-HY2",
-    "US-Edge | 美国-VPS直出-HY2-带宽": "EDGE-US | 美国-VPS直出-HY2-带宽",
-    "EDGE-US | 美国-VPS直出-HY2-带宽": "EDGE-US | 美国-VPS直出-HY2-带宽",
-    "US-Edge | 美国-AT&T家宽-HY2": "EDGE-US | 美国-AT&T家宽-HY2",
-    "EDGE-US | 美国-AT&T家宽-HY2": "EDGE-US | 美国-AT&T家宽-HY2",
-    "US-Edge | 美国-AT&T家宽-HY2-带宽": "EDGE-US | 美国-AT&T家宽-HY2-带宽",
-    "EDGE-US | 美国-AT&T家宽-HY2-带宽": "EDGE-US | 美国-AT&T家宽-HY2-带宽",
+    "US-Edge | 美国-VPS直出-HY2-带宽": "SJC-ROUTE | 美国-VPS直出-HY2-带宽",
+    "EDGE-US | 美国-VPS直出-HY2-带宽": "SJC-ROUTE | 美国-VPS直出-HY2-带宽",
+    "SJC-ROUTE | 美国-VPS直出-HY2-带宽": "SJC-ROUTE | 美国-VPS直出-HY2-带宽",
+    "US-Edge | 美国-AT&T家宽-HY2": "SJC-ROUTE | 美国-AT&T家宽-HY2",
+    "EDGE-US | 美国-AT&T家宽-HY2": "SJC-ROUTE | 美国-AT&T家宽-HY2",
+    "SJC-ROUTE | 美国-AT&T家宽-HY2": "SJC-ROUTE | 美国-AT&T家宽-HY2",
+    "US-Edge | 美国-AT&T家宽-HY2-带宽": "SJC-ROUTE | 美国-AT&T家宽-HY2-带宽",
+    "EDGE-US | 美国-AT&T家宽-HY2-带宽": "SJC-ROUTE | 美国-AT&T家宽-HY2-带宽",
+    "SJC-ROUTE | 美国-AT&T家宽-HY2-带宽": "SJC-ROUTE | 美国-AT&T家宽-HY2-带宽",
 }
 
 
@@ -274,9 +274,9 @@ def display_name_for_sub(sub):
     if name == EDGE_US_V2_ATT_SUB:
         return "20-原料-家宽-美国-AT&T-v2"
     if name == EDGE_US_V2_ROLE_SUB:
-        return "40-稳定角色-EDGE-US-v2-VMess"
+        return "40-稳定角色-SJC-ROUTE-VMess"
     if name == EDGE_US_V2_HY2_ROLE_SUB:
-        return "40-稳定角色-EDGE-US-v2-HY2"
+        return "40-稳定角色-SJC-ROUTE-HY2"
     if name == "aggregated-residential":
         return "99-历史禁用-VPS-LA-聚合家宽原料"
     if name == "my-home-chain":
@@ -301,7 +301,7 @@ def display_name_for_collection(collection):
     if name == "edge-us-upstreams":
         return "20-原料-家宽-美国Edge上游"
     if name == EDGE_US_V2_UPSTREAM_COLLECTION:
-        return "20-原料-家宽-EDGE-US-v2上游"
+        return "20-原料-家宽-SJC-ROUTE上游"
     if name == "user-landing-airports":
         return "99-历史禁用-VPS-LA-链式原料池"
     return None
@@ -327,11 +327,11 @@ def remark_for_item(item, section):
         if name == EDGE_US_HY2_ROLE_SUB:
             return "美国 edge 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。"
         if name == EDGE_US_V2_ATT_SUB:
-            return "EDGE-US v2 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
+            return "SJC-ROUTE 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
         if name == EDGE_US_V2_ROLE_SUB:
-            return "EDGE-US v2 生成的 VMess 稳定角色节点；供主节点池和 Shadowrocket 普通节点 feed 消费。"
+            return "SJC-ROUTE 生成的 VMess 稳定角色节点；供主节点池和 Shadowrocket 普通节点 feed 消费。"
         if name == EDGE_US_V2_HY2_ROLE_SUB:
-            return "EDGE-US v2 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。"
+            return "SJC-ROUTE 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。"
         if name == "my-home-chain-hy2":
             return "马来西亚 MINE 家宽 HY2 原料；可作为上游保留，客户端仍通过稳定家宽选择层消费。"
         if name in THREE_X_UPSTREAMS:
@@ -350,7 +350,7 @@ def remark_for_item(item, section):
         if name == "edge-us-upstreams":
             return "美国 edge 家宽上游集合；只放 AT&T 和未来美国住宅上游。"
         if name == EDGE_US_V2_UPSTREAM_COLLECTION:
-            return "EDGE-US v2 上游集合；只放 AT&T 和未来美国住宅上游，不直接作为客户端入口。"
+            return "SJC-ROUTE 上游集合；只放 AT&T 和未来美国住宅上游，不直接作为客户端入口。"
         if is_legacy_vps_la_object(item):
             return "历史 VPS-LA 链式集合；保留用于追溯，不作为日常客户端入口。"
     if section == "files" and name == "frontier-chain-mihomo":
@@ -726,13 +726,13 @@ def ensure_existing_edge_us_v2(data):
     for name, display, remark in (
         (
             EDGE_US_V2_ROLE_SUB,
-            "40-稳定角色-EDGE-US-v2-VMess",
-            "EDGE-US v2 生成的 VMess 稳定角色节点；供主节点池和 Shadowrocket 普通节点 feed 消费。",
+            "40-稳定角色-SJC-ROUTE-VMess",
+            "SJC-ROUTE 生成的 VMess 稳定角色节点；供主节点池和 Shadowrocket 普通节点 feed 消费。",
         ),
         (
             EDGE_US_V2_HY2_ROLE_SUB,
-            "40-稳定角色-EDGE-US-v2-HY2",
-            "EDGE-US v2 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。",
+            "40-稳定角色-SJC-ROUTE-HY2",
+            "SJC-ROUTE 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。",
         ),
     ):
         sub = find_named(subs, name)
@@ -765,8 +765,8 @@ def ensure_existing_edge_us_v2(data):
     if upstream is None:
         upstream = {
             "name": EDGE_US_V2_UPSTREAM_COLLECTION,
-            "display-name": "20-原料-家宽-EDGE-US-v2上游",
-            "displayName": "20-原料-家宽-EDGE-US-v2上游",
+            "display-name": "20-原料-家宽-SJC-ROUTE上游",
+            "displayName": "20-原料-家宽-SJC-ROUTE上游",
             "firstSubFlow": True,
             "form": "",
             "icon": "",
@@ -775,7 +775,7 @@ def ensure_existing_edge_us_v2(data):
             "mergeSources": "",
             "passThroughUA": False,
             "process": [make_quick_setting_operator()],
-            "remark": "EDGE-US v2 上游集合；只放 AT&T 和未来美国住宅上游，不直接作为客户端入口。",
+            "remark": "SJC-ROUTE 上游集合；只放 AT&T 和未来美国住宅上游，不直接作为客户端入口。",
             "subscriptionTags": [],
             "subscriptions": [],
             "tag": [],
@@ -784,8 +784,8 @@ def ensure_existing_edge_us_v2(data):
         changed.append("edge-us-v2-collection-created:" + EDGE_US_V2_UPSTREAM_COLLECTION)
     else:
         for key in ("displayName", "display-name"):
-            if upstream.get(key) != "20-原料-家宽-EDGE-US-v2上游":
-                upstream[key] = "20-原料-家宽-EDGE-US-v2上游"
+            if upstream.get(key) != "20-原料-家宽-SJC-ROUTE上游":
+                upstream[key] = "20-原料-家宽-SJC-ROUTE上游"
                 changed.append("edge-us-v2-collection-display:%s:%s" % (EDGE_US_V2_UPSTREAM_COLLECTION, key))
         if upstream.get("ignoreFailedRemoteSub") is not True:
             upstream["ignoreFailedRemoteSub"] = True
@@ -804,8 +804,8 @@ def ensure_existing_edge_us_v2(data):
         if att.get("ignoreFailedRemoteSub") is not True:
             att["ignoreFailedRemoteSub"] = True
             changed.append("edge-us-v2-att-ignore-failed:" + EDGE_US_V2_ATT_SUB)
-        if att.get("remark") != "EDGE-US v2 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。":
-            att["remark"] = "EDGE-US v2 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
+        if att.get("remark") != "SJC-ROUTE 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。":
+            att["remark"] = "SJC-ROUTE 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
             changed.append("edge-us-v2-att-remark:" + EDGE_US_V2_ATT_SUB)
         upstream_subs = upstream.setdefault("subscriptions", [])
         if EDGE_US_V2_ATT_SUB not in upstream_subs:
@@ -831,7 +831,7 @@ def clone_edge_us_v2_att(data, source_name):
     subs = data.setdefault("subs", [])
     target = find_named(subs, EDGE_US_V2_ATT_SUB)
     display = "20-原料-家宽-美国-AT&T-v2"
-    remark = "EDGE-US v2 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
+    remark = "SJC-ROUTE 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
     if target is None:
         target = {
             "name": EDGE_US_V2_ATT_SUB,

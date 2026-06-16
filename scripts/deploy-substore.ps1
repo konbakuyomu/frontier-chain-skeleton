@@ -140,6 +140,13 @@ foreach ($target in $selected) {
   Test-RequiredFile $Files[$target]
 }
 Test-RequiredFile $Files['remote-apply']
+if ($EdgeUsV2VmessBundle -or $EdgeUsV2Hy2Bundle) {
+  if (-not $EdgeUsV2VmessBundle -or -not $EdgeUsV2Hy2Bundle) {
+    throw 'EdgeUsV2VmessBundle and EdgeUsV2Hy2Bundle must be passed together'
+  }
+  Test-RequiredFile $EdgeUsV2VmessBundle
+  Test-RequiredFile $EdgeUsV2Hy2Bundle
+}
 
 foreach ($target in @('source-marker', 'nodes', 'mihomo')) {
   if ($selected -contains $target) {
@@ -223,6 +230,18 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "scp failed: $key" }
   }
 
+  $remoteEdgeUsV2VmessBundle = ''
+  $remoteEdgeUsV2Hy2Bundle = ''
+  if ($EdgeUsV2VmessBundle -and $EdgeUsV2Hy2Bundle) {
+    $remoteEdgeUsV2VmessBundle = "$remoteStage/edge-us-v2-vmess-bundle.txt"
+    $remoteEdgeUsV2Hy2Bundle = "$remoteStage/edge-us-v2-hy2-bundle.txt"
+    Write-Info 'uploading edge-us-v2 bundles'
+    & scp @scpArgs $EdgeUsV2VmessBundle "${SshUser}@${SshHost}:$remoteEdgeUsV2VmessBundle"
+    if ($LASTEXITCODE -ne 0) { throw 'scp failed: edge-us-v2 vmess bundle' }
+    & scp @scpArgs $EdgeUsV2Hy2Bundle "${SshUser}@${SshHost}:$remoteEdgeUsV2Hy2Bundle"
+    if ($LASTEXITCODE -ne 0) { throw 'scp failed: edge-us-v2 hy2 bundle' }
+  }
+
   $cmd = @(
     'python3',
     (Quote-Remote "$remoteStage/remote-apply-substore.py"),
@@ -263,13 +282,10 @@ try {
   if ($CloneEdgeUsV2AttFrom) {
     $cmd += @('--clone-edge-us-v2-att-from', (Quote-Remote $CloneEdgeUsV2AttFrom))
   }
-  if ($EdgeUsV2VmessBundle -or $EdgeUsV2Hy2Bundle) {
-    if (-not $EdgeUsV2VmessBundle -or -not $EdgeUsV2Hy2Bundle) {
-      throw 'EdgeUsV2VmessBundle and EdgeUsV2Hy2Bundle must be passed together'
-    }
+  if ($remoteEdgeUsV2VmessBundle -or $remoteEdgeUsV2Hy2Bundle) {
     $cmd += @(
-      '--edge-us-v2-vmess-bundle', (Quote-Remote $EdgeUsV2VmessBundle),
-      '--edge-us-v2-hy2-bundle', (Quote-Remote $EdgeUsV2Hy2Bundle)
+      '--edge-us-v2-vmess-bundle', (Quote-Remote $remoteEdgeUsV2VmessBundle),
+      '--edge-us-v2-hy2-bundle', (Quote-Remote $remoteEdgeUsV2Hy2Bundle)
     )
   }
   if ($LinkExistingEdgeUsV2) {
@@ -303,6 +319,8 @@ try {
     'rm -f ' + (Quote-Remote "$remoteStage/shadowrocket-nodes-injector.js"),
     'rm -f ' + (Quote-Remote "$remoteStage/main.js"),
     'rm -f ' + (Quote-Remote "$remoteStage/update-powerfullz-inline.py"),
+    'rm -f ' + (Quote-Remote "$remoteStage/edge-us-v2-vmess-bundle.txt"),
+    'rm -f ' + (Quote-Remote "$remoteStage/edge-us-v2-hy2-bundle.txt"),
     'rmdir ' + (Quote-Remote $remoteStage) + ' 2>/dev/null || true'
   ) -join ' && '
   & ssh @sshArgs $cleanupCmd | Out-Null

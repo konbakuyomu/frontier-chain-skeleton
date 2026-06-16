@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Measure application-visible latency for EDGE-US v2 and 3x-ui baseline nodes.
+  Measure application-visible latency for SJC-ROUTE and 3x-ui baseline nodes.
 
 .DESCRIPTION
   This script reads an existing Mihomo YAML profile, extracts matching nodes,
@@ -14,7 +14,7 @@
 
 .EXAMPLE
   pwsh -File .\scripts\measure-edge-real-latency.ps1
-  # defaults to EDGE-US v2 plus SJC/Malaysia/old-US 3x-ui nodes
+  # defaults to SJC-ROUTE plus SJC/Malaysia/old-US 3x-ui nodes
 
 .EXAMPLE
   pwsh -File .\scripts\measure-edge-real-latency.ps1 -Samples 10 -Warmup 2
@@ -33,7 +33,7 @@ param(
   [string]$Python = 'python',
 
   [string[]]$Nodes = @(),
-  [string]$NodeNameRegex = '^(EDGE-US|SJC-3X|MALAYSIA-3X|OLD-US-3X)\s*\|',
+  [string]$NodeNameRegex = '^(SJC-ROUTE|SJC-3X|MALAYSIA-3X|OLD-US-3X)\s*\|',
 
   [string[]]$Urls = @(
     'https://www.gstatic.com/generate_204',
