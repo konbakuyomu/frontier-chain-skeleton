@@ -54,6 +54,23 @@ const DEFAULT_SOURCE_PREFIX_MAP = {
   'aggregated-residential': 'L1-AGG',
   residential: 'L1-AGG',
 };
+const THREE_X_ROLE_DEFINITIONS = {
+  'SJC-3X': {
+    prefix: 'SJC-3X',
+    vless: 'SJC-3X | 美国-SJC-VLESS',
+    hy2: 'SJC-3X | 美国-SJC-HY2',
+  },
+  'MALAYSIA-3X': {
+    prefix: 'MALAYSIA-3X',
+    vless: 'MALAYSIA-3X | 马来西亚-VLESS',
+    hy2: 'MALAYSIA-3X | 马来西亚-HY2',
+  },
+  'OLD-US-3X': {
+    prefix: 'OLD-US-3X',
+    vless: 'OLD-US-3X | 美国旧机-VLESS',
+    hy2: 'OLD-US-3X | 美国旧机-HY2',
+  },
+};
 const SOURCE_PREFIX_FIELDS = [
   '__sourcePrefix',
   '_sourcePrefix',
@@ -348,6 +365,8 @@ function normalizeSourcePrefixValue(value, map) {
   if (value == null) return '';
   var text = String(value).trim();
   if (!text) return '';
+  var threeXPrefix = canonicalThreeXPrefix(text);
+  if (threeXPrefix) return threeXPrefix;
   if (/^L[0-9]+(?:-[A-Z0-9]+)*$/i.test(text)) return text.toUpperCase();
   if (/^(CCR|KUMA|AGG)$/i.test(text)) return 'L1-' + text.toUpperCase();
   if (/^BWH$/i.test(text)) return 'L2-BWH';
@@ -382,6 +401,45 @@ function isEvoxtNodeName(name) {
 
 function isEvoxtNode(sourcePrefix, name) {
   return sourcePrefix === 'L1-EVOXT' || isEvoxtNodeName(name);
+}
+
+function canonicalThreeXPrefix(value) {
+  var text = String(value || '').trim().toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(THREE_X_ROLE_DEFINITIONS, text)) return text;
+  return '';
+}
+
+function detectThreeXPrefix(sourcePrefix, name) {
+  var fromSource = canonicalThreeXPrefix(sourcePrefix);
+  if (fromSource) return fromSource;
+  var match = String(name || '').match(/^(SJC-3X|MALAYSIA-3X|OLD-US-3X)\s*\|/i);
+  return match ? canonicalThreeXPrefix(match[1]) : '';
+}
+
+function protocolForThreeXRole(proxy, name) {
+  var type = String((proxy && proxy.type) || '').toLowerCase();
+  var text = String(name || '');
+  if (type === 'hysteria2' || /(?:^|[-_\s])HY2(?:$|[-_\s])/i.test(text) || /hysteria\s*2/i.test(text)) return 'hy2';
+  if (type === 'vless' || /(?:^|[-_\s])VLESS(?:$|[-_\s])/i.test(text)) return 'vless';
+  return '';
+}
+
+function buildThreeXRoleName(sourcePrefix, proxy, name) {
+  var prefix = detectThreeXPrefix(sourcePrefix, name);
+  if (!prefix) return '';
+  var definition = THREE_X_ROLE_DEFINITIONS[prefix];
+  var protocol = protocolForThreeXRole(proxy, name);
+  if (protocol === 'hy2') return definition.hy2;
+  if (protocol === 'vless') return definition.vless;
+  return String(name || '');
+}
+
+function isThreeXRoleName(name) {
+  return Boolean(detectThreeXPrefix('', name));
+}
+
+function isThreeXHy2RoleName(name) {
+  return isThreeXRoleName(name) && /-HY2(?:$|-)/i.test(String(name || ''));
 }
 
 function isHysteria2Proxy(proxy, name) {
@@ -508,13 +566,17 @@ function normalizeAirportNodeName(name, proxy) {
   if (!name || INFO_PSEUDO_NODE_NAME_PATTERN.test(name)) {
     return name;
   }
+  const sourcePrefix = detectSourcePrefix(proxy);
+  const threeXName = buildThreeXRoleName(sourcePrefix, proxy, name);
+  if (threeXName) {
+    return threeXName;
+  }
   if (isPreservedUsEdgeRoleName(name)) {
     return name;
   }
   if (isPreservedMineHy2NodeName(name)) {
     return '马来西亚-MINE 动态ISP-家宽-HY2链式';
   }
-  const sourcePrefix = detectSourcePrefix(proxy);
   if (isEvoxtNode(sourcePrefix, name) && isHysteria2Proxy(proxy, name)) {
     return buildEvoxtHysteria2Name(name, proxy, sourcePrefix || 'L1-EVOXT');
   }
@@ -597,7 +659,8 @@ function isHy2OnlyNode(proxy) {
   return isHy2Proxy(proxy) && (
     /L1-EVOXT\s*\|/.test(name) ||
     isPreservedMineHy2NodeName(name) ||
-    isPreservedUsEdgeHy2RoleName(name)
+    isPreservedUsEdgeHy2RoleName(name) ||
+    isThreeXHy2RoleName(name)
   );
 }
 
@@ -756,5 +819,6 @@ if (typeof module !== 'undefined' && module.exports) {
     isNonDirectProxy: isNonDirectProxy,
     isRetiredProviderProxy: isRetiredProviderProxy,
     isTimeoutResidentialNode: isTimeoutResidentialNode,
+    isHy2OnlyNode: isHy2OnlyNode,
   };
 }

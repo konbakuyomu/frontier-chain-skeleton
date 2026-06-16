@@ -35,6 +35,45 @@ IOS_EVOXT_HY2_COLLECTION = "ios-evoxt-hy2-shadowrocket"
 IOS_EVOXT_HY2_DISPLAY_NAME = "82-输出-Shadowrocket-HY2专用"
 EDGE_US_HY2_ROLE_SUB = "edge-us-hy2-roles"
 LEGACY_EVOXT_HY2_SUBSCRIPTION = "substore-evoxt-upstream"
+LEGACY_SELF_NODE_COLLECTION_REFS = {
+    "merged-airports": {
+        "substore-evoxt-upstream",
+        "my-home-chain-hy2",
+        "edge-us-roles",
+        "edge-us-hy2-roles",
+    },
+    IOS_AIRPORTS_COLLECTION: {
+        "edge-us-roles",
+    },
+    IOS_EVOXT_HY2_COLLECTION: {
+        "substore-evoxt-upstream",
+        "my-home-chain-hy2",
+        "edge-us-hy2-roles",
+    },
+}
+THREE_X_UPSTREAMS = {
+    "sjc-3x": {
+        "prefix": "SJC-3X",
+        "display": "20-原料-3x-ui-美国-SJC",
+        "remark": "SJC 3x-ui 自建节点上游；Sub-Store 只做汇总和命名清洗。",
+        "ordinary": True,
+        "hy2": True,
+    },
+    "malaysia-3x": {
+        "prefix": "MALAYSIA-3X",
+        "display": "20-原料-3x-ui-马来西亚",
+        "remark": "Malaysia 3x-ui 自建节点上游；Sub-Store 只做汇总和命名清洗。",
+        "ordinary": True,
+        "hy2": True,
+    },
+    "old-us-3x": {
+        "prefix": "OLD-US-3X",
+        "display": "20-原料-3x-ui-美国旧机",
+        "remark": "old US 3x-ui 自建节点上游；Sub-Store 只做汇总和命名清洗。",
+        "ordinary": True,
+        "hy2": True,
+    },
+}
 
 CLIENT_COLLECTIONS = {
     "merged-airports",
@@ -113,6 +152,10 @@ def collection_subscription_names(collection):
     return [value for value in values if value]
 
 
+def set_collection_subscription_names(collection, names):
+    collection["subscriptions"] = list(names)
+
+
 def has_any_marker(text, markers):
     value = str(text or "").lower()
     return any(marker.lower() in value for marker in markers)
@@ -147,14 +190,21 @@ def ensure_list_field(item, key):
     return values
 
 
-def add_tag(item, tag):
+def add_display_tag(item, tag):
     changed = False
-    for key in ("tag", "subscriptionTags"):
-        values = ensure_list_field(item, key)
-        if tag not in values:
-            values.append(tag)
-            changed = True
+    values = ensure_list_field(item, "tag")
+    if tag not in values:
+        values.append(tag)
+        changed = True
     return changed
+
+
+def remove_subscription_selector_tag(item, tag):
+    values = item.get("subscriptionTags")
+    if not isinstance(values, list) or tag not in values:
+        return False
+    item["subscriptionTags"] = [value for value in values if value != tag]
+    return True
 
 
 def set_display_fields(item, display_name):
@@ -175,6 +225,8 @@ def set_remark(item, remark):
 
 def display_name_for_sub(sub):
     name = str(sub.get("name") or "")
+    if name in THREE_X_UPSTREAMS:
+        return THREE_X_UPSTREAMS[name]["display"]
     if name == "ccrui":
         return "10-原料-普通机场-CCR"
     if name == "kuma":
@@ -236,6 +288,8 @@ def remark_for_item(item, section):
             return "美国 edge 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。"
         if name == "my-home-chain-hy2":
             return "马来西亚 MINE 家宽 HY2 原料；可作为上游保留，客户端仍通过稳定家宽选择层消费。"
+        if name in THREE_X_UPSTREAMS:
+            return THREE_X_UPSTREAMS[name]["remark"]
         if is_legacy_vps_la_object(item):
             return "历史 VPS-LA 链式对象；保留用于追溯，不进入日常输出池。"
         if is_residential_object(item):
@@ -275,8 +329,10 @@ def apply_display_taxonomy(data):
             remark = remark_for_item(item, section)
             if remark and set_remark(item, remark):
                 changed.append("%s-remark:%s" % (section, name))
-            if add_tag(item, DISPLAY_TAXONOMY_TAG):
+            if add_display_tag(item, DISPLAY_TAXONOMY_TAG):
                 changed.append("%s-tag:%s" % (section, name))
+            if remove_subscription_selector_tag(item, DISPLAY_TAXONOMY_TAG):
+                changed.append("%s-subscriptionTags-scrubbed:%s" % (section, name))
             if section == "subs" and item.get("source") == "remote" and is_residential_object(item):
                 if item.get("ignoreFailedRemoteSub") is not True:
                     item["ignoreFailedRemoteSub"] = True
@@ -529,6 +585,86 @@ def ensure_residential_subscription(
     return changed
 
 
+def ensure_existing_three_x_subscriptions(data, source_marker_content, collection_name):
+    if not source_marker_content:
+        raise RuntimeError("--link-existing-three-x requires --source-marker")
+    changed = []
+    subs = data.get("subs", []) or []
+    missing = []
+    for name, meta in THREE_X_UPSTREAMS.items():
+        sub = find_named(subs, name)
+        if sub is None:
+            missing.append(name)
+            continue
+        for key in ("displayName", "display-name"):
+            if sub.get(key) != meta["display"]:
+                sub[key] = meta["display"]
+                changed.append("three-x-display:%s:%s" % (name, key))
+        if sub.get("remark") != meta["remark"]:
+            sub["remark"] = meta["remark"]
+            changed.append("three-x-remark:" + name)
+        if sub.get("ignoreFailedRemoteSub") is not True:
+            sub["ignoreFailedRemoteSub"] = True
+            changed.append("three-x-ignore-failed:" + name)
+        sub.setdefault("tag", [])
+        sub.setdefault("subscriptionTags", [])
+        ops = script_ops(sub)
+        marker_ops = [
+            op for op in ops
+            if str(op.get("customName") or "").startswith("source marker:")
+            or "Sub-Store source marker" in str((op.get("args") or {}).get("content") or "")
+        ]
+        if not marker_ops:
+            sub.setdefault("process", []).append(make_source_marker_operator(source_marker_content, meta["prefix"]))
+            changed.append("three-x-source-marker-added:" + name)
+        else:
+            op = marker_ops[-1]
+            if set_script_content(op, source_marker_content, "source marker: " + meta["prefix"]):
+                changed.append("three-x-source-marker-content:" + name)
+            args = op.setdefault("args", {})
+            arguments = args.setdefault("arguments", {})
+            if not isinstance(arguments, dict):
+                arguments = {}
+                args["arguments"] = arguments
+            if arguments.get("source_prefix") != meta["prefix"]:
+                arguments["source_prefix"] = meta["prefix"]
+                changed.append("three-x-source-prefix:" + name)
+
+    if missing:
+        raise RuntimeError("missing existing 3x-ui subscriptions; create in Web UI first: " + ",".join(missing))
+
+    collection_map = {
+        collection_name: list(THREE_X_UPSTREAMS.keys()),
+        IOS_AIRPORTS_COLLECTION: [name for name, meta in THREE_X_UPSTREAMS.items() if meta.get("ordinary")],
+        IOS_EVOXT_HY2_COLLECTION: [name for name, meta in THREE_X_UPSTREAMS.items() if meta.get("hy2")],
+    }
+    for cname, names in collection_map.items():
+        collection = find_named(data.get("collections", []), cname)
+        if not collection:
+            raise RuntimeError("missing collection: " + cname)
+        subscriptions = collection.setdefault("subscriptions", [])
+        for name in names:
+            if name not in subscriptions:
+                subscriptions.append(name)
+                changed.append("three-x-collection-linked:%s:%s" % (cname, name))
+    return changed
+
+
+def unlink_legacy_self_node_refs(data):
+    changed = []
+    for collection_name, legacy_names in LEGACY_SELF_NODE_COLLECTION_REFS.items():
+        collection = find_named(data.get("collections", []), collection_name)
+        if not collection:
+            continue
+        current = collection_subscription_names(collection)
+        updated = [name for name in current if name not in legacy_names]
+        removed = [name for name in current if name in legacy_names]
+        if removed:
+            set_collection_subscription_names(collection, updated)
+            changed.append("%s:%s" % (collection_name, ",".join(removed)))
+    return changed
+
+
 def ensure_collection_variant(data, source_collection_name, name, display_name, subscriptions, remark):
     source = find_named(data.get("collections", []), source_collection_name)
     if not source:
@@ -716,6 +852,8 @@ def main():
     parser.add_argument("--aggregator-name", default=DEFAULT_AGGREGATOR_NAME)
     parser.add_argument("--aggregator-display-name", default=DEFAULT_AGGREGATOR_DISPLAY_NAME)
     parser.add_argument("--aggregator-source-prefix", default=DEFAULT_AGGREGATOR_SOURCE_PREFIX)
+    parser.add_argument("--link-existing-three-x", action="store_true")
+    parser.add_argument("--unlink-legacy-self-nodes", action="store_true")
     parser.add_argument("--ios-airports-subscriptions", default="")
     parser.add_argument("--ios-hy2-subscriptions", "--ios-hy2-subscription", dest="ios_hy2_subscriptions", default="")
     parser.add_argument("--no-backup", action="store_true")
@@ -747,6 +885,24 @@ def main():
             "changed": names,
             "name": args.aggregator_name,
             "source_prefix": args.aggregator_source_prefix,
+        })
+
+    if args.link_existing_three_x:
+        names = ensure_existing_three_x_subscriptions(
+            data,
+            source_marker_content,
+            args.collection,
+        )
+        changes.append({
+            "target": "existing-three-x-upstreams",
+            "changed": names,
+        })
+
+    if args.unlink_legacy_self_nodes:
+        names = unlink_legacy_self_node_refs(data)
+        changes.append({
+            "target": "legacy-self-node-refs",
+            "changed": names,
         })
 
     if args.source_marker:

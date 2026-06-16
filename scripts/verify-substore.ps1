@@ -33,6 +33,8 @@ param(
   [string]$IosHy2Collection = 'ios-evoxt-hy2-shadowrocket',
   [string]$LocalBaseUrl = 'http://127.0.0.1:3001',
   [string]$ExpectedBackendPath = $env:FRONTIER_EXPECTED_BACKEND_PATH,
+  [int]$ExpectedThreeXVless = -1,
+  [int]$ExpectedThreeXHy2 = -1,
   [int]$MinIosOrdinaryNodes = 1,
   [int]$MinIosHy2Nodes = 0
 )
@@ -53,6 +55,9 @@ $PyFiles = @(
   (Join-Path $PSScriptRoot 'remote-verify-substore.py'),
   (Join-Path $PSScriptRoot 'remote-apply-substore.py'),
   (Join-Path $PSScriptRoot 'update-powerfullz-inline.py')
+)
+$NodeCheckScripts = @(
+  (Join-Path $PSScriptRoot 'check-3x-injector.js')
 )
 
 function Write-Info($Message) { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
@@ -87,6 +92,11 @@ if ($node) {
     & node --check $file
     if ($LASTEXITCODE -ne 0) { throw "node --check failed: $file" }
     Write-Ok "node --check passed: $(Split-Path -Leaf $file)"
+  }
+  foreach ($file in $NodeCheckScripts) {
+    & node $file
+    if ($LASTEXITCODE -ne 0) { throw "node behavior check failed: $file" }
+    Write-Ok "node behavior check passed: $(Split-Path -Leaf $file)"
   }
 } else {
   Write-Warn2 'node not found, skipped JS syntax checks'
@@ -161,6 +171,12 @@ try {
   )
   if ($ExpectedBackendPath) {
     $cmd += @('--expected-backend-path', (Quote-Remote $ExpectedBackendPath))
+  }
+  if ($ExpectedThreeXVless -ge 0) {
+    $cmd += @('--expected-three-x-vless', $ExpectedThreeXVless)
+  }
+  if ($ExpectedThreeXHy2 -ge 0) {
+    $cmd += @('--expected-three-x-hy2', $ExpectedThreeXHy2)
   }
   if ($SkipHttp) { $cmd += '--skip-http' }
 

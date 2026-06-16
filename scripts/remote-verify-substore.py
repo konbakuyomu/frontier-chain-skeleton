@@ -53,6 +53,9 @@ EXPECTED_DISPLAY_NAMES = {
         "edge-us-att": "20-原料-家宽-美国-AT&T",
         "edge-us-roles": "40-稳定角色-美国Edge家宽",
         "edge-us-hy2-roles": "40-稳定角色-美国Edge-HY2",
+        "sjc-3x": "20-原料-3x-ui-美国-SJC",
+        "malaysia-3x": "20-原料-3x-ui-马来西亚",
+        "old-us-3x": "20-原料-3x-ui-美国旧机",
     },
     "collections": {
         "merged-airports": "80-输出-三端主节点池",
@@ -73,11 +76,22 @@ LEGACY_VPS_LA_DAILY_EXCLUDES = {
     "my-home-chain",
     "测试",
 }
+LEGACY_SELF_NODE_ACTIVE_EXCLUDES = {
+    "aggregated-residential",
+    "substore-evoxt-upstream",
+    "my-home-chain",
+    "my-home-chain-hy2",
+    "edge-us-att",
+    "edge-us-roles",
+    "edge-us-hy2-roles",
+}
 CLIENT_COLLECTION_NAMES = {
     "merged-airports",
     "ios-airports-uri",
     "ios-evoxt-hy2-shadowrocket",
 }
+THREE_X_PREFIXES = ("SJC-3X", "MALAYSIA-3X", "OLD-US-3X")
+THREE_X_FORBIDDEN_PREFIXES = ("LAX-3X", "MY-3X")
 DEFAULT_TIMEOUT_RESIDENTIAL_NAMES = [
     "cf加速|越南动态家宽🇻🇳",
     "越南-cf加速 动态 🇻🇳-家宽",
@@ -348,6 +362,8 @@ def analyze_ios_hy2_shadowrocket_output(text):
         "proxy_count": len(proxies),
         "evoxt_count": sum(1 for name in names if "L1-EVOXT" in name),
         "us_edge_hy2_count": sum(1 for name in names if re.search(r"US-Edge\s*\|.*-HY2", name, re.I)),
+        "three_x_hy2_count": sum(1 for name in names if is_three_x_hy2_name(name)),
+        "three_x_prefix_counts": three_x_prefix_counts(names),
         "hysteria2_count": sum(1 for proxy_type in types if proxy_type == "hysteria2"),
         "has_yaml_shape": text.lstrip().startswith("proxies:"),
         "forbidden_counts": forbidden_counts(text),
@@ -474,10 +490,14 @@ def analyze_mihomo_output(text):
     visible_proxy_groups = section(visible_text, "proxy-groups")
     rules = section(text, "rules")
     rule_items = extract_rules(rules)
-    names = extract_proxy_names(proxies)
-    evoxt_blocks = [block for block in extract_proxy_blocks(proxies) if "L1-EVOXT" in block]
-    us_edge_blocks = [block for block in extract_proxy_blocks(proxies) if "US-Edge |" in block]
-    us_edge_hy2_blocks = [block for block in us_edge_blocks if re.search(r"US-Edge\s*\|.*-HY2", block, re.I)]
+    proxy_items = extract_mihomo_proxy_items(text)
+    names = [proxy_item_name(item) for item in proxy_items] or extract_proxy_names(proxies)
+    evoxt_items = [item for item in proxy_items if "L1-EVOXT" in proxy_item_name(item)]
+    us_edge_items = [item for item in proxy_items if "US-Edge |" in proxy_item_name(item)]
+    us_edge_hy2_items = [item for item in us_edge_items if re.search(r"US-Edge\s*\|.*-HY2", proxy_item_name(item), re.I)]
+    three_x_items = [item for item in proxy_items if is_three_x_name(proxy_item_name(item))]
+    three_x_hy2_items = [item for item in three_x_items if is_three_x_hy2_name(proxy_item_name(item))]
+    three_x_vless_items = [item for item in three_x_items if proxy_item_type(item) == "vless"]
     quality = name_quality(names)
     quality.update({
         "bytes": len(text.encode("utf-8")),
@@ -488,15 +508,20 @@ def analyze_mihomo_output(text):
         "has_dns": bool(section(text, "dns")),
         "proxy_group_count": count_regex(proxy_groups, r"^\s*-\s*name\s*:"),
         "rule_count": count_regex(rules, r"^\s*-\s*"),
-        "evoxt_node_count": len(evoxt_blocks),
-        "evoxt_hysteria2_count": sum(1 for block in evoxt_blocks if proxy_block_type(block) == "hysteria2"),
-        "evoxt_hysteria2_sni_count": sum(1 for block in evoxt_blocks if proxy_block_type(block) == "hysteria2" and proxy_block_has_sni(block)),
-        "evoxt_vless_count": sum(1 for block in evoxt_blocks if proxy_block_type(block) == "vless"),
-        "evoxt_reality_count": sum(1 for block in evoxt_blocks if proxy_block_is_reality(block)),
-        "evoxt_malaysia_name_count": sum(1 for block in evoxt_blocks if "马来西亚" in block or "Malaysia" in block),
-        "us_edge_node_count": len(us_edge_blocks),
-        "us_edge_hy2_count": len(us_edge_hy2_blocks),
-        "us_edge_vmess_count": sum(1 for block in us_edge_blocks if proxy_block_type(block) == "vmess"),
+        "evoxt_node_count": len(evoxt_items),
+        "evoxt_hysteria2_count": sum(1 for item in evoxt_items if proxy_item_type(item) == "hysteria2"),
+        "evoxt_hysteria2_sni_count": sum(1 for item in evoxt_items if proxy_item_type(item) == "hysteria2" and proxy_item_has_sni(item)),
+        "evoxt_vless_count": sum(1 for item in evoxt_items if proxy_item_type(item) == "vless"),
+        "evoxt_reality_count": sum(1 for item in evoxt_items if proxy_item_is_reality(item)),
+        "evoxt_malaysia_name_count": sum(1 for item in evoxt_items if "马来西亚" in proxy_item_name(item) or "Malaysia" in proxy_item_name(item)),
+        "us_edge_node_count": len(us_edge_items),
+        "us_edge_hy2_count": len(us_edge_hy2_items),
+        "us_edge_vmess_count": sum(1 for item in us_edge_items if proxy_item_type(item) == "vmess"),
+        "three_x_node_count": len(three_x_items),
+        "three_x_hy2_count": len(three_x_hy2_items),
+        "three_x_vless_count": len(three_x_vless_items),
+        "three_x_reality_count": sum(1 for item in three_x_vless_items if proxy_item_is_reality(item)),
+        "three_x_prefix_counts": three_x_prefix_counts([proxy_item_name(item) for item in three_x_items]),
         "has_evoxt_group": "name: Evoxt 自建" in visible_proxy_groups or "name: 'Evoxt 自建'" in visible_proxy_groups or "name: \"Evoxt 自建\"" in visible_proxy_groups,
         "evoxt_group_refs": group_body_refs(visible_proxy_groups, "Evoxt 自建", "L1-EVOXT |"),
         "evoxt_group_http_probe": group_body_refs(visible_proxy_groups, "Evoxt 自建", "http://cp.cloudflare.com/generate_204"),
@@ -535,6 +560,46 @@ def analyze_mihomo_output(text):
     return quality
 
 
+def extract_mihomo_proxy_items(text):
+    try:
+        data = yaml_safe_load(text)
+    except Exception:
+        return [
+            {"__block": block}
+            for block in extract_proxy_blocks(section(text, "proxies"))
+        ]
+    proxies = data.get("proxies") if isinstance(data, dict) else None
+    if not isinstance(proxies, list):
+        return []
+    return [item for item in proxies if isinstance(item, dict)]
+
+
+def proxy_item_name(item):
+    if "__block" in item:
+        return proxy_block_name(item["__block"])
+    return str(item.get("name") or "")
+
+
+def proxy_item_type(item):
+    if "__block" in item:
+        return proxy_block_type(item["__block"])
+    return str(item.get("type") or "").strip().lower()
+
+
+def proxy_item_is_reality(item):
+    if "__block" in item:
+        return proxy_block_is_reality(item["__block"])
+    return proxy_item_type(item) == "vless" and (
+        "reality-opts" in item or re.search(r"(?i)\breality\b", json.dumps(item, ensure_ascii=False)) is not None
+    )
+
+
+def proxy_item_has_sni(item):
+    if "__block" in item:
+        return proxy_block_has_sni(item["__block"])
+    return bool(item.get("sni") or item.get("servername"))
+
+
 def extract_proxy_blocks(proxies_text):
     blocks = []
     current = []
@@ -548,6 +613,11 @@ def extract_proxy_blocks(proxies_text):
     if current:
         blocks.append("\n".join(current))
     return blocks
+
+
+def proxy_block_name(block):
+    match = re.search(r"(?m)^\s*-\s+name\s*:\s*['\"]?(.+?)['\"]?\s*$", block)
+    return match.group(1).strip().strip("'\"") if match else ""
 
 
 def proxy_block_type(block):
@@ -641,6 +711,39 @@ def is_us_edge_hy2_name(name):
     return re.search(r"US-Edge\s*\|.*-HY2(?:$|-)", str(name or ""), re.I) is not None
 
 
+def is_three_x_name(name):
+    text = str(name or "")
+    return any(re.search(r"^%s\s*\|" % re.escape(prefix), text, re.I) for prefix in THREE_X_PREFIXES)
+
+
+def is_three_x_hy2_name(name):
+    return is_three_x_name(name) and re.search(r"-HY2(?:$|-)", str(name or ""), re.I) is not None
+
+
+def is_three_x_vless_name(name):
+    return is_three_x_name(name) and re.search(r"-VLESS(?:$|-)", str(name or ""), re.I) is not None
+
+
+def three_x_prefix_counts(names):
+    counts = {}
+    for name in names:
+        text = str(name or "")
+        for prefix in THREE_X_PREFIXES:
+            if re.search(r"^%s\s*\|" % re.escape(prefix), text, re.I):
+                counts[prefix] = counts.get(prefix, 0) + 1
+                break
+    return counts
+
+
+def forbidden_three_x_names(names):
+    out = []
+    for name in names:
+        text = str(name or "")
+        if any(re.search(r"^%s\s*\|" % re.escape(prefix), text, re.I) for prefix in THREE_X_FORBIDDEN_PREFIXES):
+            out.append(text)
+    return out
+
+
 def is_residential_object(item):
     searchable = " ".join(
         str((item or {}).get(key) or "")
@@ -669,13 +772,22 @@ def missing_taxonomy_tags(data):
         for item in data.get(section, []) or []:
             if not isinstance(item, dict) or not item.get("name"):
                 continue
-            tags = []
-            for key in ("tag", "subscriptionTags"):
-                if isinstance(item.get(key), list):
-                    tags.extend(str(value) for value in item.get(key))
-            if DISPLAY_TAXONOMY_TAG not in tags:
+            tags = item.get("tag") if isinstance(item.get("tag"), list) else []
+            if DISPLAY_TAXONOMY_TAG not in [str(value) for value in tags]:
                 missing.append("%s:%s" % (section, item.get("name")))
     return missing
+
+
+def taxonomy_subscription_tag_leaks(data):
+    leaks = []
+    for section in ("subs", "collections", "files"):
+        for item in data.get(section, []) or []:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            values = item.get("subscriptionTags")
+            if isinstance(values, list) and DISPLAY_TAXONOMY_TAG in [str(value) for value in values]:
+                leaks.append("%s:%s" % (section, item.get("name")))
+    return leaks
 
 
 def residential_remote_failure_isolation_gaps(data):
@@ -692,8 +804,18 @@ def legacy_daily_collection_refs(data):
     refs = []
     for collection_name in CLIENT_COLLECTION_NAMES:
         collection = find_named(data.get("collections", []), collection_name)
-        for sub_name in collection_subscription_names(collection):
+        for sub_name in effective_collection_subscription_names(data, collection):
             if sub_name in LEGACY_VPS_LA_DAILY_EXCLUDES:
+                refs.append("%s:%s" % (collection_name, sub_name))
+    return refs
+
+
+def legacy_self_node_collection_refs(data):
+    refs = []
+    for collection_name in CLIENT_COLLECTION_NAMES:
+        collection = find_named(data.get("collections", []), collection_name)
+        for sub_name in effective_collection_subscription_names(data, collection):
+            if sub_name in LEGACY_SELF_NODE_ACTIVE_EXCLUDES:
                 refs.append("%s:%s" % (collection_name, sub_name))
     return refs
 
@@ -734,7 +856,7 @@ def referenced_remote_subs(data, collection_names):
     seen = set()
     for collection_name in collection_names:
         collection = find_named(data.get("collections", []), collection_name)
-        for sub_name in collection_subscription_names(collection):
+        for sub_name in effective_collection_subscription_names(data, collection):
             if sub_name in seen:
                 continue
             seen.add(sub_name)
@@ -742,6 +864,25 @@ def referenced_remote_subs(data, collection_names):
             if sub and sub.get("source") == "remote":
                 result.append(sub)
     return result
+
+
+def effective_collection_subscription_names(data, collection):
+    names = collection_subscription_names(collection)
+    seen = set(names)
+    selector_tags = (collection or {}).get("subscriptionTags")
+    if isinstance(selector_tags, list) and selector_tags:
+        selector_tags = {str(tag) for tag in selector_tags}
+        for sub in data.get("subs", []) or []:
+            if not isinstance(sub, dict):
+                continue
+            sub_name = str(sub.get("name") or "")
+            sub_tags = sub.get("tag")
+            if not sub_name or sub_name in seen or not isinstance(sub_tags, list):
+                continue
+            if selector_tags.intersection(str(tag) for tag in sub_tags):
+                names.append(sub_name)
+                seen.add(sub_name)
+    return names
 
 
 def summarise_forbidden_args(collection, file_item):
@@ -762,6 +903,8 @@ def main():
     parser.add_argument("--ios-hy2-collection", default="ios-evoxt-hy2-shadowrocket")
     parser.add_argument("--local-base-url", default="http://127.0.0.1:3001")
     parser.add_argument("--expected-backend-path", default="")
+    parser.add_argument("--expected-three-x-vless", type=int, default=None)
+    parser.add_argument("--expected-three-x-hy2", type=int, default=None)
     parser.add_argument("--min-ios-ordinary-nodes", type=int, default=1)
     parser.add_argument("--min-ios-hy2-nodes", type=int, default=0)
     parser.add_argument("--skip-http", action="store_true")
@@ -789,8 +932,10 @@ def main():
     checks.append(ok("mihomo file exists", file_item is not None, args.file))
     display_mismatches = taxonomy_display_mismatches(data)
     missing_taxonomy = missing_taxonomy_tags(data)
+    taxonomy_tag_leaks = taxonomy_subscription_tag_leaks(data)
     residential_isolation_gaps = residential_remote_failure_isolation_gaps(data)
     legacy_refs = legacy_daily_collection_refs(data)
+    legacy_self_refs = legacy_self_node_collection_refs(data)
     checks.append(ok(
         "Sub-Store display taxonomy matches stable names",
         not display_mismatches,
@@ -802,6 +947,11 @@ def main():
         safe_detail_dict({"missing": missing_taxonomy[:10], "count": len(missing_taxonomy)}),
     ))
     checks.append(ok(
+        "display taxonomy tag is not used as a subscription selector",
+        not taxonomy_tag_leaks,
+        safe_detail_dict({"leaks": taxonomy_tag_leaks[:10], "count": len(taxonomy_tag_leaks)}),
+    ))
+    checks.append(ok(
         "residential remote upstreams ignore failed fetches",
         not residential_isolation_gaps,
         safe_detail_dict({"gaps": residential_isolation_gaps}),
@@ -810,6 +960,11 @@ def main():
         "legacy VPS-LA objects are not in daily client collections",
         not legacy_refs,
         safe_detail_dict({"refs": legacy_refs}),
+    ))
+    checks.append(ok(
+        "legacy self-node refs are not active through explicit refs or selector tags",
+        not legacy_self_refs,
+        safe_detail_dict({"refs": legacy_self_refs}),
     ))
     checks.append(warn("Sub-Store display prefix counts", safe_detail_dict(display_prefix_counts(data))))
 
@@ -867,8 +1022,10 @@ def main():
                 clash = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=ClashMeta" % args.collection)
                 http["collection_clashmeta"] = analyze_collection_output(clash)
                 clash_names = extract_proxy_names(clash)
+                clash_prefix_counts = http["collection_clashmeta"]["known_source_prefix_counts"]
                 checks.append(ok("ClashMeta collection has nodes", len(clash_names) > 0, "count=" + str(len(clash_names))))
                 checks.append(ok("ClashMeta collection has no retired link names", not http["collection_clashmeta"]["forbidden_counts"], safe_detail_dict(http["collection_clashmeta"]["forbidden_counts"])))
+                checks.append(ok("ClashMeta collection excludes legacy Evoxt/US Edge self nodes", clash_prefix_counts.get("EVOXT", 0) == 0 and clash_prefix_counts.get("US_EDGE", 0) == 0, safe_detail_dict(clash_prefix_counts)))
                 checks.append(ok("ClashMeta collection has no source marker leak", not http["collection_clashmeta"]["source_marker_leak"]))
                 checks.append(ok("ClashMeta collection has residential candidates", http["collection_clashmeta"]["residential_candidate_count"] > 0, str(http["collection_clashmeta"]["residential_candidate_count"])))
                 checks.append(ok("ClashMeta collection excludes pseudo/non-direct nodes", http["collection_clashmeta"]["pseudo_or_non_direct_count"] == 0, str(http["collection_clashmeta"]["pseudo_or_non_direct_count"])))
@@ -879,7 +1036,9 @@ def main():
                 shadow = fetch_local(args.local_base_url, backend_path, "/download/collection/%s?target=ShadowRocket" % args.collection)
                 http["collection_shadowrocket"] = analyze_collection_output(shadow)
                 shadow_names = extract_proxy_names(shadow)
+                shadow_prefix_counts = http["collection_shadowrocket"]["known_source_prefix_counts"]
                 checks.append(ok("ShadowRocket collection has no retired link names", not http["collection_shadowrocket"]["forbidden_counts"], safe_detail_dict(http["collection_shadowrocket"]["forbidden_counts"])))
+                checks.append(ok("ShadowRocket collection excludes legacy Evoxt/US Edge self nodes", shadow_prefix_counts.get("EVOXT", 0) == 0 and shadow_prefix_counts.get("US_EDGE", 0) == 0, safe_detail_dict(shadow_prefix_counts)))
                 checks.append(ok("ShadowRocket collection has residential candidates", http["collection_shadowrocket"]["residential_candidate_count"] > 0, str(http["collection_shadowrocket"]["residential_candidate_count"])))
                 checks.append(ok("ShadowRocket collection excludes pseudo/non-direct nodes", http["collection_shadowrocket"]["pseudo_or_non_direct_count"] == 0, str(http["collection_shadowrocket"]["pseudo_or_non_direct_count"])))
                 checks.append(ok("ShadowRocket collection excludes timeout residential blacklist", http["collection_shadowrocket"]["timeout_residential_count"] == 0, str(http["collection_shadowrocket"]["timeout_residential_count"])))
@@ -907,10 +1066,21 @@ def main():
                 http["ios_airports_uri"] = analyze_uri_output(ios_uri)
                 ios_uri_names = extract_proxy_names(ios_uri)
                 ios_uri_us_edge_hy2 = [name for name in ios_uri_names if is_us_edge_hy2_name(name)]
+                ios_uri_three_x_hy2 = [name for name in ios_uri_names if is_three_x_hy2_name(name)]
+                ios_uri_three_x_vless = [name for name in ios_uri_names if is_three_x_vless_name(name)]
+                ios_uri_forbidden_three_x = forbidden_three_x_names(ios_uri_names)
                 ios_uri_schemes = http["ios_airports_uri"]["scheme_counts"]
                 checks.append(ok("iOS airports URI collection is line-based", not http["ios_airports_uri"]["has_yaml_shape"], safe_detail_dict(ios_uri_schemes)))
                 checks.append(ok("iOS airports URI excludes Evoxt", not any("L1-EVOXT" in name for name in ios_uri_names), str(sum(1 for name in ios_uri_names if "L1-EVOXT" in name))))
                 checks.append(ok("iOS airports URI excludes US Edge HY2", not ios_uri_us_edge_hy2, str(len(ios_uri_us_edge_hy2))))
+                checks.append(ok("iOS airports URI excludes 3X HY2", not ios_uri_three_x_hy2, str(len(ios_uri_three_x_hy2))))
+                checks.append(ok("iOS airports URI excludes old 3X prefixes", not ios_uri_forbidden_three_x, str(len(ios_uri_forbidden_three_x))))
+                checks.append(warn("iOS airports URI 3X VLESS stats", safe_detail_dict({
+                    "three_x_vless_count": len(ios_uri_three_x_vless),
+                    "three_x_prefix_counts": three_x_prefix_counts(ios_uri_names),
+                })))
+                if args.expected_three_x_vless is not None:
+                    checks.append(ok("iOS airports URI expected 3X VLESS count", len(ios_uri_three_x_vless) == args.expected_three_x_vless, "%s" % len(ios_uri_three_x_vless)))
                 checks.append(ok("iOS airports URI has ordinary nodes", http["ios_airports_uri"]["line_count"] >= args.min_ios_ordinary_nodes, str(http["ios_airports_uri"]["line_count"])))
                 checks.append(ok("iOS airports URI keeps residential candidates", http["ios_airports_uri"]["residential_candidate_count"] > 0, str(http["ios_airports_uri"]["residential_candidate_count"])))
             except Exception as exc:
@@ -925,6 +1095,17 @@ def main():
                     "us_edge_hy2_count": http["ios_evoxt_hy2_shadowrocket"]["us_edge_hy2_count"],
                     "evoxt_count": http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"],
                 })))
+                checks.append(ok("iOS HY2 excludes legacy Evoxt/US Edge self nodes", http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"] == 0 and http["ios_evoxt_hy2_shadowrocket"]["us_edge_hy2_count"] == 0, safe_detail_dict({
+                    "us_edge_hy2_count": http["ios_evoxt_hy2_shadowrocket"]["us_edge_hy2_count"],
+                    "evoxt_count": http["ios_evoxt_hy2_shadowrocket"]["evoxt_count"],
+                })))
+                checks.append(warn("iOS HY2 3X stats", safe_detail_dict({
+                    "three_x_hy2_count": http["ios_evoxt_hy2_shadowrocket"]["three_x_hy2_count"],
+                    "three_x_prefix_counts": http["ios_evoxt_hy2_shadowrocket"]["three_x_prefix_counts"],
+                })))
+                if args.expected_three_x_hy2 is not None:
+                    checks.append(ok("iOS HY2 expected 3X HY2 count", http["ios_evoxt_hy2_shadowrocket"]["three_x_hy2_count"] == args.expected_three_x_hy2, "%s" % http["ios_evoxt_hy2_shadowrocket"]["three_x_hy2_count"]))
+                checks.append(ok("iOS HY2 excludes old 3X prefixes", not forbidden_three_x_names(extract_proxy_names(ios_hy2)), "0"))
             except Exception as exc:
                 checks.append(warn("iOS HY2 collection fetch skipped", str(exc)))
             try:
@@ -946,6 +1127,22 @@ def main():
                     "us_edge_vmess_count": http["final_mihomo"]["us_edge_vmess_count"],
                     "us_edge_hy2_count": http["final_mihomo"]["us_edge_hy2_count"],
                 })))
+                checks.append(ok("final mihomo excludes legacy Evoxt/US Edge self nodes", http["final_mihomo"]["evoxt_node_count"] == 0 and http["final_mihomo"]["us_edge_node_count"] == 0, safe_detail_dict({
+                    "evoxt_node_count": http["final_mihomo"]["evoxt_node_count"],
+                    "us_edge_node_count": http["final_mihomo"]["us_edge_node_count"],
+                })))
+                checks.append(warn("final mihomo 3X stats", safe_detail_dict({
+                    "three_x_node_count": http["final_mihomo"]["three_x_node_count"],
+                    "three_x_vless_count": http["final_mihomo"]["three_x_vless_count"],
+                    "three_x_hy2_count": http["final_mihomo"]["three_x_hy2_count"],
+                    "three_x_reality_count": http["final_mihomo"]["three_x_reality_count"],
+                    "three_x_prefix_counts": http["final_mihomo"]["three_x_prefix_counts"],
+                })))
+                if args.expected_three_x_vless is not None:
+                    checks.append(ok("final mihomo expected 3X VLESS count", http["final_mihomo"]["three_x_vless_count"] == args.expected_three_x_vless, "%s" % http["final_mihomo"]["three_x_vless_count"]))
+                if args.expected_three_x_hy2 is not None:
+                    checks.append(ok("final mihomo expected 3X HY2 count", http["final_mihomo"]["three_x_hy2_count"] == args.expected_three_x_hy2, "%s" % http["final_mihomo"]["three_x_hy2_count"]))
+                checks.append(ok("final mihomo excludes old 3X prefixes", not forbidden_three_x_names(extract_proxy_names(final)), "0"))
                 checks.append(ok("GLOBAL does not expose removed Evoxt shortcut group", http["final_mihomo"]["global_evoxt_refs"] == 0, str(http["final_mihomo"]["global_evoxt_refs"])))
                 checks.append(ok("final mihomo uses stable residential shortcut layer", http["final_mihomo"]["global_us_residential_refs"] > 0 or http["final_mihomo"]["global_apac_residential_refs"] > 0, "us=%s apac=%s" % (http["final_mihomo"]["global_us_residential_refs"], http["final_mihomo"]["global_apac_residential_refs"])))
                 checks.append(ok("final mihomo uses HTTP 204 url-test probe", http["final_mihomo"]["http_probe_group_count"] > 0, str(http["final_mihomo"]["http_probe_group_count"])))

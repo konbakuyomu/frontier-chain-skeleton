@@ -43,6 +43,8 @@ param(
   [string]$ResidentialAggregatorName = 'aggregated-residential',
   [string]$ResidentialAggregatorDisplayName = '20-原料-家宽-聚合',
   [string]$ResidentialAggregatorSourcePrefix = 'AGG',
+  [switch]$LinkExistingThreeX,
+  [switch]$UnlinkLegacySelfNodes,
   [string]$IosAirportsSubscriptions = $env:FRONTIER_IOS_AIRPORTS_SUBSCRIPTIONS,
   [string]$IosHy2Subscriptions = $env:FRONTIER_IOS_HY2_SUBSCRIPTIONS,
   [switch]$NoBackup,
@@ -118,7 +120,7 @@ function Quote-Remote($Text) {
 }
 
 $selected = Get-SelectedTargets
-if ($ResidentialAggregatorUrl -and -not ($selected -contains 'source-marker')) {
+if (($ResidentialAggregatorUrl -or $LinkExistingThreeX) -and -not ($selected -contains 'source-marker')) {
   $selected = @('source-marker') + $selected
 }
 
@@ -157,6 +159,12 @@ if (-not $Apply) {
   }
   if ($ResidentialAggregatorUrl) {
     Write-Host ("  {0,-18} -> {1} ({2})" -f 'residential-upstream', $ResidentialAggregatorName, $ResidentialAggregatorSourcePrefix)
+  }
+if ($LinkExistingThreeX) {
+    Write-Host ("  {0,-18} -> link existing sjc-3x/malaysia-3x/old-us-3x subscriptions" -f 'existing-3x')
+  }
+  if ($UnlinkLegacySelfNodes) {
+    Write-Host ("  {0,-18} -> unlink old SJC/Malaysia generated/local refs from active collections" -f 'legacy-unlink')
   }
   if ($IosAirportsSubscriptions) {
     Write-Host ("  {0,-18} -> explicit subscription list" -f 'ios-airports-uri')
@@ -227,6 +235,12 @@ try {
       '--aggregator-display-name', (Quote-Remote $ResidentialAggregatorDisplayName),
       '--aggregator-source-prefix', (Quote-Remote $ResidentialAggregatorSourcePrefix)
     )
+  }
+  if ($LinkExistingThreeX) {
+    $cmd += '--link-existing-three-x'
+  }
+  if ($UnlinkLegacySelfNodes) {
+    $cmd += '--unlink-legacy-self-nodes'
   }
   if ($IosAirportsSubscriptions) {
     $cmd += @('--ios-airports-subscriptions', (Quote-Remote $IosAirportsSubscriptions))
