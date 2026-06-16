@@ -27,6 +27,8 @@ uploads the appliance to REMOTE_DIR, and runs docker compose up -d.
 
 Options:
   --env-file FILE     load env file; may be repeated, later files override earlier ones
+                     set EDGE_ROLES_FILE / EDGE_HY2_ROLES_FILE in env to render
+                     an alternate public-safe role registry such as EDGE-US v2
   --patch-substore   after deploy, PATCH existing target Sub-Store sub edge-us-roles
                      using scripts/patch-substore.sh
 USAGE
@@ -79,6 +81,8 @@ EDGE_OPENRESTY_CONTAINER="${EDGE_OPENRESTY_CONTAINER:-1Panel-openresty-kOZu}"
 EDGE_OPENRESTY_CONF_DIR="${EDGE_OPENRESTY_CONF_DIR:-/opt/1panel/apps/openresty/openresty/conf/conf.d}"
 EDGE_OPENRESTY_CONF_NAME="${EDGE_OPENRESTY_CONF_NAME:-${EDGE_PUBLIC_HOST}.conf}"
 EDGE_ENABLE_HY2="${EDGE_ENABLE_HY2:-0}"
+EDGE_ROLES_FILE="${EDGE_ROLES_FILE:-}"
+EDGE_HY2_ROLES_FILE="${EDGE_HY2_ROLES_FILE:-}"
 REQUIRED_LOCAL_PORTS=""
 REQUIRED_UDP_PORTS=""
 SSH_ARGS=(-o BatchMode=yes)
@@ -98,6 +102,14 @@ for env_file in "${ENV_FILES[@]}"; do
   GEN_ENV_ARGS+=(--env-file "$env_file")
   PATCH_ENV_ARGS+=(--env-file "$env_file")
 done
+if [ -n "$EDGE_ROLES_FILE" ]; then
+  [ -f "$EDGE_ROLES_FILE" ] || { echo "ERROR: EDGE_ROLES_FILE not found: $EDGE_ROLES_FILE" >&2; exit 1; }
+  GEN_ENV_ARGS+=(--roles-file "$EDGE_ROLES_FILE")
+fi
+if [ -n "$EDGE_HY2_ROLES_FILE" ]; then
+  [ -f "$EDGE_HY2_ROLES_FILE" ] || { echo "ERROR: EDGE_HY2_ROLES_FILE not found: $EDGE_HY2_ROLES_FILE" >&2; exit 1; }
+  GEN_ENV_ARGS+=(--hy2-roles-file "$EDGE_HY2_ROLES_FILE")
+fi
 
 python3 "$EDGE_DIR/generate.py" --check "${GEN_ENV_ARGS[@]}"
 

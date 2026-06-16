@@ -10,6 +10,7 @@ its upstream pool without hardcoded supplier names.
 """
 
 import argparse
+import base64
 import copy
 import hashlib
 import json
@@ -34,6 +35,11 @@ IOS_AIRPORTS_DISPLAY_NAME = "81-输出-Shadowrocket-普通节点URI"
 IOS_EVOXT_HY2_COLLECTION = "ios-evoxt-hy2-shadowrocket"
 IOS_EVOXT_HY2_DISPLAY_NAME = "82-输出-Shadowrocket-HY2专用"
 EDGE_US_HY2_ROLE_SUB = "edge-us-hy2-roles"
+EDGE_US_V2_UPSTREAM_COLLECTION = "edge-us-v2-upstreams"
+EDGE_US_V2_ATT_SUB = "edge-us-v2-att"
+EDGE_US_V2_ROLE_SUB = "edge-us-v2-roles"
+EDGE_US_V2_HY2_ROLE_SUB = "edge-us-v2-hy2-roles"
+DEFAULT_EDGE_US_V2_ATT_SOURCE = "edge-us-att"
 LEGACY_EVOXT_HY2_SUBSCRIPTION = "substore-evoxt-upstream"
 LEGACY_SELF_NODE_COLLECTION_REFS = {
     "merged-airports": {
@@ -80,7 +86,7 @@ CLIENT_COLLECTIONS = {
     IOS_AIRPORTS_COLLECTION,
     IOS_EVOXT_HY2_COLLECTION,
 }
-EDGE_COLLECTIONS = {"edge-us-upstreams"}
+EDGE_COLLECTIONS = {"edge-us-upstreams", EDGE_US_V2_UPSTREAM_COLLECTION}
 LEGACY_VPS_LA_OBJECT_NAMES = {
     "aggregated-residential",
     "user-landing-airports",
@@ -104,6 +110,22 @@ RESIDENTIAL_TEXT_MARKERS = (
     "at&t",
 )
 DISPLAY_TAXONOMY_TAG = "frontier-display-v2"
+EDGE_US_V2_VMESS_NAMES = {
+    "US-Edge | 美国-VPS直出": "EDGE-US | 美国-VPS直出",
+    "EDGE-US | 美国-VPS直出": "EDGE-US | 美国-VPS直出",
+    "US-Edge | 美国-AT&T家宽": "EDGE-US | 美国-AT&T家宽",
+    "EDGE-US | 美国-AT&T家宽": "EDGE-US | 美国-AT&T家宽",
+}
+EDGE_US_V2_HY2_NAMES = {
+    "US-Edge | 美国-VPS直出-HY2": "EDGE-US | 美国-VPS直出-HY2",
+    "EDGE-US | 美国-VPS直出-HY2": "EDGE-US | 美国-VPS直出-HY2",
+    "US-Edge | 美国-VPS直出-HY2-带宽": "EDGE-US | 美国-VPS直出-HY2-带宽",
+    "EDGE-US | 美国-VPS直出-HY2-带宽": "EDGE-US | 美国-VPS直出-HY2-带宽",
+    "US-Edge | 美国-AT&T家宽-HY2": "EDGE-US | 美国-AT&T家宽-HY2",
+    "EDGE-US | 美国-AT&T家宽-HY2": "EDGE-US | 美国-AT&T家宽-HY2",
+    "US-Edge | 美国-AT&T家宽-HY2-带宽": "EDGE-US | 美国-AT&T家宽-HY2-带宽",
+    "EDGE-US | 美国-AT&T家宽-HY2-带宽": "EDGE-US | 美国-AT&T家宽-HY2-带宽",
+}
 
 
 def read_text(path):
@@ -112,6 +134,16 @@ def read_text(path):
 
 def short_hash(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def b64decode_padded(text):
+    raw = text.strip()
+    raw += "=" * (-len(raw) % 4)
+    return base64.b64decode(raw)
+
+
+def b64encode_text(text):
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
 
 
 def find_named(items, name):
@@ -239,6 +271,12 @@ def display_name_for_sub(sub):
         return "40-稳定角色-美国Edge家宽"
     if name == EDGE_US_HY2_ROLE_SUB:
         return "40-稳定角色-美国Edge-HY2"
+    if name == EDGE_US_V2_ATT_SUB:
+        return "20-原料-家宽-美国-AT&T-v2"
+    if name == EDGE_US_V2_ROLE_SUB:
+        return "40-稳定角色-EDGE-US-v2-VMess"
+    if name == EDGE_US_V2_HY2_ROLE_SUB:
+        return "40-稳定角色-EDGE-US-v2-HY2"
     if name == "aggregated-residential":
         return "99-历史禁用-VPS-LA-聚合家宽原料"
     if name == "my-home-chain":
@@ -262,6 +300,8 @@ def display_name_for_collection(collection):
         return IOS_EVOXT_HY2_DISPLAY_NAME
     if name == "edge-us-upstreams":
         return "20-原料-家宽-美国Edge上游"
+    if name == EDGE_US_V2_UPSTREAM_COLLECTION:
+        return "20-原料-家宽-EDGE-US-v2上游"
     if name == "user-landing-airports":
         return "99-历史禁用-VPS-LA-链式原料池"
     return None
@@ -286,6 +326,12 @@ def remark_for_item(item, section):
             return "美国 edge 生成的稳定角色节点；供主节点池和 Shadowrocket 普通节点 feed 消费。"
         if name == EDGE_US_HY2_ROLE_SUB:
             return "美国 edge 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。"
+        if name == EDGE_US_V2_ATT_SUB:
+            return "EDGE-US v2 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
+        if name == EDGE_US_V2_ROLE_SUB:
+            return "EDGE-US v2 生成的 VMess 稳定角色节点；供主节点池和 Shadowrocket 普通节点 feed 消费。"
+        if name == EDGE_US_V2_HY2_ROLE_SUB:
+            return "EDGE-US v2 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。"
         if name == "my-home-chain-hy2":
             return "马来西亚 MINE 家宽 HY2 原料；可作为上游保留，客户端仍通过稳定家宽选择层消费。"
         if name in THREE_X_UPSTREAMS:
@@ -303,6 +349,8 @@ def remark_for_item(item, section):
             return "Shadowrocket HY2 专用输出；内部名沿用旧 Evoxt 命名，可包含 Evoxt、MINE 和美国 Edge HY2 节点。"
         if name == "edge-us-upstreams":
             return "美国 edge 家宽上游集合；只放 AT&T 和未来美国住宅上游。"
+        if name == EDGE_US_V2_UPSTREAM_COLLECTION:
+            return "EDGE-US v2 上游集合；只放 AT&T 和未来美国住宅上游，不直接作为客户端入口。"
         if is_legacy_vps_la_object(item):
             return "历史 VPS-LA 链式集合；保留用于追溯，不作为日常客户端入口。"
     if section == "files" and name == "frontier-chain-mihomo":
@@ -650,6 +698,317 @@ def ensure_existing_three_x_subscriptions(data, source_marker_content, collectio
     return changed
 
 
+def make_local_subscription(name, display_name, remark):
+    return {
+        "name": name,
+        "display-name": display_name,
+        "displayName": display_name,
+        "source": "local",
+        "url": "",
+        "content": "",
+        "form": "",
+        "ua": "",
+        "mergeSources": "",
+        "passThroughUA": False,
+        "ignoreFailedRemoteSub": False,
+        "isIconColor": True,
+        "icon": "",
+        "tag": [],
+        "subscriptionTags": [],
+        "remark": remark,
+        "process": [make_quick_setting_operator()],
+    }
+
+
+def ensure_existing_edge_us_v2(data):
+    changed = []
+    subs = data.setdefault("subs", [])
+    for name, display, remark in (
+        (
+            EDGE_US_V2_ROLE_SUB,
+            "40-稳定角色-EDGE-US-v2-VMess",
+            "EDGE-US v2 生成的 VMess 稳定角色节点；供主节点池和 Shadowrocket 普通节点 feed 消费。",
+        ),
+        (
+            EDGE_US_V2_HY2_ROLE_SUB,
+            "40-稳定角色-EDGE-US-v2-HY2",
+            "EDGE-US v2 生成的 HY2 稳定角色节点；供主节点池和 Shadowrocket HY2 专用 feed 消费。",
+        ),
+    ):
+        sub = find_named(subs, name)
+        if sub is None:
+            subs.append(make_local_subscription(name, display, remark))
+            changed.append("edge-us-v2-sub-created:" + name)
+            continue
+        if sub.get("source") != "local":
+            sub["source"] = "local"
+            changed.append("edge-us-v2-source-local:" + name)
+        if sub.get("url"):
+            sub["url"] = ""
+            changed.append("edge-us-v2-url-cleared:" + name)
+        for key in ("displayName", "display-name"):
+            if sub.get(key) != display:
+                sub[key] = display
+                changed.append("edge-us-v2-display:%s:%s" % (name, key))
+        if sub.get("remark") != remark:
+            sub["remark"] = remark
+            changed.append("edge-us-v2-remark:" + name)
+        sub.setdefault("content", "")
+        sub.setdefault("form", "")
+        sub.setdefault("ua", "")
+        sub.setdefault("tag", [])
+        sub.setdefault("subscriptionTags", [])
+        sub.setdefault("process", [make_quick_setting_operator()])
+
+    collections = data.setdefault("collections", [])
+    upstream = find_named(collections, EDGE_US_V2_UPSTREAM_COLLECTION)
+    if upstream is None:
+        upstream = {
+            "name": EDGE_US_V2_UPSTREAM_COLLECTION,
+            "display-name": "20-原料-家宽-EDGE-US-v2上游",
+            "displayName": "20-原料-家宽-EDGE-US-v2上游",
+            "firstSubFlow": True,
+            "form": "",
+            "icon": "",
+            "ignoreFailedRemoteSub": True,
+            "isIconColor": True,
+            "mergeSources": "",
+            "passThroughUA": False,
+            "process": [make_quick_setting_operator()],
+            "remark": "EDGE-US v2 上游集合；只放 AT&T 和未来美国住宅上游，不直接作为客户端入口。",
+            "subscriptionTags": [],
+            "subscriptions": [],
+            "tag": [],
+        }
+        collections.append(upstream)
+        changed.append("edge-us-v2-collection-created:" + EDGE_US_V2_UPSTREAM_COLLECTION)
+    else:
+        for key in ("displayName", "display-name"):
+            if upstream.get(key) != "20-原料-家宽-EDGE-US-v2上游":
+                upstream[key] = "20-原料-家宽-EDGE-US-v2上游"
+                changed.append("edge-us-v2-collection-display:%s:%s" % (EDGE_US_V2_UPSTREAM_COLLECTION, key))
+        if upstream.get("ignoreFailedRemoteSub") is not True:
+            upstream["ignoreFailedRemoteSub"] = True
+            changed.append("edge-us-v2-collection-ignore-failed:" + EDGE_US_V2_UPSTREAM_COLLECTION)
+        upstream.setdefault("subscriptions", [])
+        upstream.setdefault("subscriptionTags", [])
+        upstream.setdefault("tag", [])
+        upstream.setdefault("process", [make_quick_setting_operator()])
+
+    att = find_named(subs, EDGE_US_V2_ATT_SUB)
+    if att is not None:
+        for key in ("displayName", "display-name"):
+            if att.get(key) != "20-原料-家宽-美国-AT&T-v2":
+                att[key] = "20-原料-家宽-美国-AT&T-v2"
+                changed.append("edge-us-v2-att-display:%s:%s" % (EDGE_US_V2_ATT_SUB, key))
+        if att.get("ignoreFailedRemoteSub") is not True:
+            att["ignoreFailedRemoteSub"] = True
+            changed.append("edge-us-v2-att-ignore-failed:" + EDGE_US_V2_ATT_SUB)
+        if att.get("remark") != "EDGE-US v2 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。":
+            att["remark"] = "EDGE-US v2 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
+            changed.append("edge-us-v2-att-remark:" + EDGE_US_V2_ATT_SUB)
+        upstream_subs = upstream.setdefault("subscriptions", [])
+        if EDGE_US_V2_ATT_SUB not in upstream_subs:
+            upstream_subs.append(EDGE_US_V2_ATT_SUB)
+            changed.append("edge-us-v2-upstream-linked:" + EDGE_US_V2_ATT_SUB)
+    return changed
+
+
+def clone_edge_us_v2_att(data, source_name):
+    source = find_named(data.get("subs", []), source_name)
+    if source is None:
+        raise RuntimeError("missing source AT&T upstream subscription: " + source_name)
+    source_kind = str(source.get("source") or "")
+    if source_kind == "remote":
+        if not source.get("url"):
+            raise RuntimeError("source AT&T remote subscription has no URL: " + source_name)
+    elif source_kind == "local":
+        if not source.get("content"):
+            raise RuntimeError("source AT&T local subscription has no content: " + source_name)
+    else:
+        raise RuntimeError("source AT&T upstream must be remote or local: " + source_name)
+    changed = []
+    subs = data.setdefault("subs", [])
+    target = find_named(subs, EDGE_US_V2_ATT_SUB)
+    display = "20-原料-家宽-美国-AT&T-v2"
+    remark = "EDGE-US v2 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
+    if target is None:
+        target = {
+            "name": EDGE_US_V2_ATT_SUB,
+            "display-name": display,
+            "displayName": display,
+            "source": source_kind,
+            "url": source.get("url") if source_kind == "remote" else "",
+            "content": source.get("content") if source_kind == "local" else "",
+            "form": "",
+            "ua": "",
+            "mergeSources": "",
+            "passThroughUA": False,
+            "ignoreFailedRemoteSub": True,
+            "isIconColor": True,
+            "icon": "",
+            "tag": [],
+            "subscriptionTags": [],
+            "remark": remark,
+            "process": [copy.deepcopy(make_quick_setting_operator())],
+        }
+        subs.append(target)
+        changed.append("edge-us-v2-att-created-from:" + source_name)
+    else:
+        if target.get("source") != source_kind:
+            target["source"] = source_kind
+            changed.append("edge-us-v2-att-source-synced-from:" + source_name)
+        next_url = source.get("url") if source_kind == "remote" else ""
+        next_content = source.get("content") if source_kind == "local" else ""
+        if target.get("url") != next_url:
+            target["url"] = next_url
+            changed.append("edge-us-v2-att-url-synced-from:" + source_name)
+        if target.get("content") != next_content:
+            target["content"] = next_content
+            changed.append("edge-us-v2-att-content-synced-from:" + source_name)
+    if source_kind == "remote":
+        if target.get("url") != source.get("url"):
+            target["url"] = source.get("url")
+            changed.append("edge-us-v2-att-url-synced-from:" + source_name)
+        if target.get("content") != "":
+            target["content"] = ""
+            changed.append("edge-us-v2-att-content-cleared:" + EDGE_US_V2_ATT_SUB)
+    else:
+        if target.get("url") != "":
+            target["url"] = ""
+            changed.append("edge-us-v2-att-url-cleared:" + EDGE_US_V2_ATT_SUB)
+        if target.get("content") != source.get("content"):
+            target["content"] = source.get("content")
+            changed.append("edge-us-v2-att-content-synced-from:" + source_name)
+    for key in ("displayName", "display-name"):
+        if target.get(key) != display:
+            target[key] = display
+            changed.append("edge-us-v2-att-display:%s:%s" % (EDGE_US_V2_ATT_SUB, key))
+    if target.get("remark") != remark:
+        target["remark"] = remark
+        changed.append("edge-us-v2-att-remark:" + EDGE_US_V2_ATT_SUB)
+    if target.get("ignoreFailedRemoteSub") is not True:
+        target["ignoreFailedRemoteSub"] = True
+        changed.append("edge-us-v2-att-ignore-failed:" + EDGE_US_V2_ATT_SUB)
+    target.setdefault("content", "")
+    target.setdefault("form", "")
+    target.setdefault("ua", "")
+    target.setdefault("tag", [])
+    target.setdefault("subscriptionTags", [])
+    target.setdefault("process", [make_quick_setting_operator()])
+
+    collections = data.setdefault("collections", [])
+    upstream = find_named(collections, EDGE_US_V2_UPSTREAM_COLLECTION)
+    if upstream is None:
+        ensure_existing_edge_us_v2(data)
+        upstream = find_named(collections, EDGE_US_V2_UPSTREAM_COLLECTION)
+    upstream_subs = upstream.setdefault("subscriptions", [])
+    if EDGE_US_V2_ATT_SUB not in upstream_subs:
+        upstream_subs.append(EDGE_US_V2_ATT_SUB)
+        changed.append("edge-us-v2-upstream-linked:" + EDGE_US_V2_ATT_SUB)
+    return changed
+
+
+def link_existing_edge_us_v2(data, collection_name):
+    missing = [
+        name for name in (EDGE_US_V2_ROLE_SUB, EDGE_US_V2_HY2_ROLE_SUB)
+        if not subscription_exists(data, name)
+    ]
+    if missing:
+        raise RuntimeError("missing EDGE-US v2 local subscriptions: " + ",".join(missing))
+    collection_map = {
+        collection_name: [EDGE_US_V2_ROLE_SUB, EDGE_US_V2_HY2_ROLE_SUB],
+        IOS_AIRPORTS_COLLECTION: [EDGE_US_V2_ROLE_SUB],
+        IOS_EVOXT_HY2_COLLECTION: [EDGE_US_V2_HY2_ROLE_SUB],
+    }
+    changed = []
+    for cname, names in collection_map.items():
+        collection = find_named(data.get("collections", []), cname)
+        if not collection:
+            raise RuntimeError("missing collection: " + cname)
+        subscriptions = collection.setdefault("subscriptions", [])
+        for name in names:
+            if name not in subscriptions:
+                subscriptions.append(name)
+                changed.append("edge-us-v2-collection-linked:%s:%s" % (cname, name))
+    return changed
+
+
+def rewrite_vmess_bundle_for_edge_us_v2(text):
+    lines = []
+    seen = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or not line.startswith("vmess://"):
+            continue
+        try:
+            item = json.loads(b64decode_padded(line[8:]).decode("utf-8"))
+        except Exception:
+            continue
+        name = str(item.get("ps") or "")
+        next_name = EDGE_US_V2_VMESS_NAMES.get(name)
+        if not next_name or next_name in seen:
+            continue
+        item["ps"] = next_name
+        lines.append("vmess://" + b64encode_text(json.dumps(item, ensure_ascii=False, separators=(",", ":"))))
+        seen.add(next_name)
+    missing = sorted(set(EDGE_US_V2_VMESS_NAMES.values()) - seen)
+    if missing:
+        raise RuntimeError("missing EDGE-US v2 VMess roles in bundle: " + ",".join(missing))
+    return "\n".join(lines) + "\n"
+
+
+def rewrite_hy2_bundle_for_edge_us_v2(text):
+    try:
+        import yaml
+    except Exception as exc:
+        raise RuntimeError("PyYAML is required to rewrite HY2 bundle: " + str(exc))
+    data = yaml.safe_load(text) or {}
+    proxies = data.get("proxies")
+    if not isinstance(proxies, list):
+        raise RuntimeError("HY2 bundle has no proxies list")
+    out = []
+    seen = set()
+    for proxy in proxies:
+        if not isinstance(proxy, dict):
+            continue
+        name = str(proxy.get("name") or "")
+        next_name = EDGE_US_V2_HY2_NAMES.get(name)
+        if not next_name or next_name in seen:
+            continue
+        item = copy.deepcopy(proxy)
+        item["name"] = next_name
+        out.append(item)
+        seen.add(next_name)
+    missing = sorted(set(EDGE_US_V2_HY2_NAMES.values()) - seen)
+    if missing:
+        raise RuntimeError("missing EDGE-US v2 HY2 roles in bundle: " + ",".join(missing))
+    return yaml.safe_dump({"proxies": out}, allow_unicode=True, sort_keys=False)
+
+
+def patch_edge_us_v2_content_from_files(data, vmess_bundle, hy2_bundle):
+    changed = []
+    vmess_content = rewrite_vmess_bundle_for_edge_us_v2(read_text(vmess_bundle))
+    hy2_content = rewrite_hy2_bundle_for_edge_us_v2(read_text(hy2_bundle))
+    for name, content in (
+        (EDGE_US_V2_ROLE_SUB, vmess_content),
+        (EDGE_US_V2_HY2_ROLE_SUB, hy2_content),
+    ):
+        sub = find_named(data.get("subs", []), name)
+        if sub is None:
+            raise RuntimeError("missing EDGE-US v2 local sub: " + name)
+        if sub.get("source") != "local":
+            sub["source"] = "local"
+            changed.append("edge-us-v2-content-source-local:" + name)
+        if sub.get("url"):
+            sub["url"] = ""
+            changed.append("edge-us-v2-content-url-cleared:" + name)
+        if sub.get("content") != content:
+            sub["content"] = content
+            changed.append("edge-us-v2-content-updated:%s:%s" % (name, short_hash(content)))
+    return changed
+
+
 def unlink_legacy_self_node_refs(data):
     changed = []
     for collection_name, legacy_names in LEGACY_SELF_NODE_COLLECTION_REFS.items():
@@ -853,6 +1212,11 @@ def main():
     parser.add_argument("--aggregator-display-name", default=DEFAULT_AGGREGATOR_DISPLAY_NAME)
     parser.add_argument("--aggregator-source-prefix", default=DEFAULT_AGGREGATOR_SOURCE_PREFIX)
     parser.add_argument("--link-existing-three-x", action="store_true")
+    parser.add_argument("--ensure-existing-edge-us-v2", action="store_true")
+    parser.add_argument("--clone-edge-us-v2-att-from", default="")
+    parser.add_argument("--edge-us-v2-vmess-bundle", default="")
+    parser.add_argument("--edge-us-v2-hy2-bundle", default="")
+    parser.add_argument("--link-existing-edge-us-v2", action="store_true")
     parser.add_argument("--unlink-legacy-self-nodes", action="store_true")
     parser.add_argument("--ios-airports-subscriptions", default="")
     parser.add_argument("--ios-hy2-subscriptions", "--ios-hy2-subscription", dest="ios_hy2_subscriptions", default="")
@@ -895,6 +1259,41 @@ def main():
         )
         changes.append({
             "target": "existing-three-x-upstreams",
+            "changed": names,
+        })
+
+    if args.ensure_existing_edge_us_v2:
+        names = ensure_existing_edge_us_v2(data)
+        changes.append({
+            "target": "existing-edge-us-v2-objects",
+            "changed": names,
+        })
+
+    if args.clone_edge_us_v2_att_from:
+        names = clone_edge_us_v2_att(data, args.clone_edge_us_v2_att_from)
+        changes.append({
+            "target": "edge-us-v2-att-upstream",
+            "changed": names,
+            "source": args.clone_edge_us_v2_att_from,
+        })
+
+    if args.edge_us_v2_vmess_bundle or args.edge_us_v2_hy2_bundle:
+        if not args.edge_us_v2_vmess_bundle or not args.edge_us_v2_hy2_bundle:
+            raise RuntimeError("--edge-us-v2-vmess-bundle and --edge-us-v2-hy2-bundle must be passed together")
+        names = patch_edge_us_v2_content_from_files(
+            data,
+            args.edge_us_v2_vmess_bundle,
+            args.edge_us_v2_hy2_bundle,
+        )
+        changes.append({
+            "target": "edge-us-v2-content",
+            "changed": names,
+        })
+
+    if args.link_existing_edge_us_v2:
+        names = link_existing_edge_us_v2(data, args.collection)
+        changes.append({
+            "target": "existing-edge-us-v2-links",
             "changed": names,
         })
 

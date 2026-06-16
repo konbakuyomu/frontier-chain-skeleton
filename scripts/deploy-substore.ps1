@@ -44,6 +44,11 @@ param(
   [string]$ResidentialAggregatorDisplayName = '20-原料-家宽-聚合',
   [string]$ResidentialAggregatorSourcePrefix = 'AGG',
   [switch]$LinkExistingThreeX,
+  [switch]$EnsureExistingEdgeUsV2,
+  [switch]$LinkExistingEdgeUsV2,
+  [string]$CloneEdgeUsV2AttFrom = $env:FRONTIER_EDGE_US_V2_ATT_SOURCE,
+  [string]$EdgeUsV2VmessBundle = $env:FRONTIER_EDGE_US_V2_VMESS_BUNDLE,
+  [string]$EdgeUsV2Hy2Bundle = $env:FRONTIER_EDGE_US_V2_HY2_BUNDLE,
   [switch]$UnlinkLegacySelfNodes,
   [string]$IosAirportsSubscriptions = $env:FRONTIER_IOS_AIRPORTS_SUBSCRIPTIONS,
   [string]$IosHy2Subscriptions = $env:FRONTIER_IOS_HY2_SUBSCRIPTIONS,
@@ -123,6 +128,7 @@ $selected = Get-SelectedTargets
 if (($ResidentialAggregatorUrl -or $LinkExistingThreeX) -and -not ($selected -contains 'source-marker')) {
   $selected = @('source-marker') + $selected
 }
+if (-not $CloneEdgeUsV2AttFrom) { $CloneEdgeUsV2AttFrom = '' }
 
 Write-Info "repo root: $RepoRoot"
 Write-Info "targets: $($selected -join ', ')"
@@ -162,6 +168,18 @@ if (-not $Apply) {
   }
 if ($LinkExistingThreeX) {
     Write-Host ("  {0,-18} -> link existing sjc-3x/malaysia-3x/old-us-3x subscriptions" -f 'existing-3x')
+  }
+  if ($EnsureExistingEdgeUsV2) {
+    Write-Host ("  {0,-18} -> ensure edge-us-v2 local subs and upstream collection" -f 'edge-us-v2')
+  }
+  if ($CloneEdgeUsV2AttFrom) {
+    Write-Host ("  {0,-18} -> clone AT&T upstream into edge-us-v2-att from $CloneEdgeUsV2AttFrom" -f 'edge-us-v2-att')
+  }
+  if ($EdgeUsV2VmessBundle -or $EdgeUsV2Hy2Bundle) {
+    Write-Host ("  {0,-18} -> patch edge-us-v2 local sub content from remote appliance bundles" -f 'edge-us-v2-content')
+  }
+  if ($LinkExistingEdgeUsV2) {
+    Write-Host ("  {0,-18} -> link edge-us-v2-roles / edge-us-v2-hy2-roles into active collections" -f 'edge-us-v2-link')
   }
   if ($UnlinkLegacySelfNodes) {
     Write-Host ("  {0,-18} -> unlink old SJC/Malaysia generated/local refs from active collections" -f 'legacy-unlink')
@@ -238,6 +256,24 @@ try {
   }
   if ($LinkExistingThreeX) {
     $cmd += '--link-existing-three-x'
+  }
+  if ($EnsureExistingEdgeUsV2) {
+    $cmd += '--ensure-existing-edge-us-v2'
+  }
+  if ($CloneEdgeUsV2AttFrom) {
+    $cmd += @('--clone-edge-us-v2-att-from', (Quote-Remote $CloneEdgeUsV2AttFrom))
+  }
+  if ($EdgeUsV2VmessBundle -or $EdgeUsV2Hy2Bundle) {
+    if (-not $EdgeUsV2VmessBundle -or -not $EdgeUsV2Hy2Bundle) {
+      throw 'EdgeUsV2VmessBundle and EdgeUsV2Hy2Bundle must be passed together'
+    }
+    $cmd += @(
+      '--edge-us-v2-vmess-bundle', (Quote-Remote $EdgeUsV2VmessBundle),
+      '--edge-us-v2-hy2-bundle', (Quote-Remote $EdgeUsV2Hy2Bundle)
+    )
+  }
+  if ($LinkExistingEdgeUsV2) {
+    $cmd += '--link-existing-edge-us-v2'
   }
   if ($UnlinkLegacySelfNodes) {
     $cmd += '--unlink-legacy-self-nodes'

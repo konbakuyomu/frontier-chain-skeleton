@@ -555,7 +555,7 @@ function isPreservedMineHy2NodeName(name) {
 }
 
 function isPreservedUsEdgeRoleName(name) {
-  return /^US-Edge\s*\|/.test(String(name || ''));
+  return /^(?:US-Edge|EDGE-US)\s*\|/.test(String(name || ''));
 }
 
 function isPreservedUsEdgeHy2RoleName(name) {

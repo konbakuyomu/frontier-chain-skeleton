@@ -35,6 +35,8 @@ param(
   [string]$ExpectedBackendPath = $env:FRONTIER_EXPECTED_BACKEND_PATH,
   [int]$ExpectedThreeXVless = -1,
   [int]$ExpectedThreeXHy2 = -1,
+  [int]$ExpectedEdgeUsV2Vmess = -1,
+  [int]$ExpectedEdgeUsV2Hy2 = -1,
   [int]$MinIosOrdinaryNodes = 1,
   [int]$MinIosHy2Nodes = 0
 )
@@ -177,6 +179,12 @@ try {
   }
   if ($ExpectedThreeXHy2 -ge 0) {
     $cmd += @('--expected-three-x-hy2', $ExpectedThreeXHy2)
+  }
+  if ($ExpectedEdgeUsV2Vmess -ge 0) {
+    $cmd += @('--expected-edge-us-v2-vmess', $ExpectedEdgeUsV2Vmess)
+  }
+  if ($ExpectedEdgeUsV2Hy2 -ge 0) {
+    $cmd += @('--expected-edge-us-v2-hy2', $ExpectedEdgeUsV2Hy2)
   }
   if ($SkipHttp) { $cmd += '--skip-http' }
 

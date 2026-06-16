@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Measure application-visible latency for US Edge VMess and HY2 nodes.
+  Measure application-visible latency for EDGE-US v2 and 3x-ui baseline nodes.
 
 .DESCRIPTION
   This script reads an existing Mihomo YAML profile, extracts matching nodes,
@@ -14,6 +14,7 @@
 
 .EXAMPLE
   pwsh -File .\scripts\measure-edge-real-latency.ps1
+  # defaults to EDGE-US v2 plus SJC/Malaysia/old-US 3x-ui nodes
 
 .EXAMPLE
   pwsh -File .\scripts\measure-edge-real-latency.ps1 -Samples 10 -Warmup 2
@@ -32,7 +33,7 @@ param(
   [string]$Python = 'python',
 
   [string[]]$Nodes = @(),
-  [string]$NodeNameRegex = '^US-Edge \|',
+  [string]$NodeNameRegex = '^(EDGE-US|SJC-3X|MALAYSIA-3X|OLD-US-3X)\s*\|',
 
   [string[]]$Urls = @(
     'https://www.gstatic.com/generate_204',
@@ -67,6 +68,7 @@ if (-not [System.IO.Path]::IsPathRooted($WorkDir)) {
 $Timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunDir = Join-Path $WorkDir $Timestamp
 $ConfigPath = Join-Path $RunDir 'mihomo-real-latency.yaml'
+$ConfigBuilderPath = Join-Path $RunDir 'build-temp-config.py'
 $RawCsvPath = Join-Path $RunDir 'raw.csv'
 $SummaryCsvPath = Join-Path $RunDir 'summary-by-url.csv'
 $OverallCsvPath = Join-Path $RunDir 'summary-overall.csv'
@@ -130,8 +132,9 @@ function Invoke-ControllerJson($Method, $Path, $BodyObject) {
     TimeoutSec = 8
   }
   if ($null -ne $BodyObject) {
-    $args['ContentType'] = 'application/json'
-    $args['Body'] = ($BodyObject | ConvertTo-Json -Compress)
+    $args['ContentType'] = 'application/json; charset=utf-8'
+    $bodyJson = ($BodyObject | ConvertTo-Json -Compress)
+    $args['Body'] = [System.Text.Encoding]::UTF8.GetBytes($bodyJson)
   }
   return Invoke-RestMethod @args
 }
@@ -162,13 +165,16 @@ function Invoke-CurlTiming($NodeName, $Url, $Iteration, [bool]$IsWarmup) {
     '--output', 'NUL',
     '--max-time', "$TimeoutSeconds",
     '--connect-timeout', "$ConnectTimeoutSeconds",
-    '--proxy', "socks5h://127.0.0.1:$MixedPort",
+    "--proxy=socks5h://127.0.0.1:$MixedPort",
     '--write-out', $writeOut,
-    $Url
+    '--url', $Url
   )
 
+  $oldNativePreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
   $output = & curl.exe @curlArgs 2>&1
   $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $oldNativePreference
   $metricLine = @($output | Where-Object { $_ -is [string] -and $_ -like 'code=*' } | Select-Object -Last 1)
   $errorText = @($output | Where-Object { -not ($_ -is [string] -and $_ -like 'code=*') }) -join ' '
 
@@ -316,13 +322,17 @@ print(json.dumps(selected_names, ensure_ascii=True))
 '@
 
 Write-Info "Building temporary Mihomo config from $ProfilePath"
-$pyOutput = & $Python -c $configBuilder $ProfilePath $ConfigPath $NodeNameRegex $nodesJson $MixedPort $ControllerPort $GroupName 2>&1
+Set-Content -LiteralPath $ConfigBuilderPath -Value $configBuilder -Encoding UTF8
+$pyOutput = & $Python $ConfigBuilderPath $ProfilePath $ConfigPath $NodeNameRegex $nodesJson $MixedPort $ControllerPort $GroupName 2>&1
 if ($LASTEXITCODE -ne 0) {
   throw "Failed to build temporary config: $($pyOutput -join ' ')"
 }
 
 $pyOutputLines = @($pyOutput)
-$selectedNodes = @($pyOutputLines[-1] | ConvertFrom-Json)
+$selectedNodes = @(,($pyOutputLines[-1] | ConvertFrom-Json))
+if ($selectedNodes.Count -eq 1 -and $selectedNodes[0] -is [System.Array]) {
+  $selectedNodes = @($selectedNodes[0])
+}
 Write-Ok ("Selected nodes: " + ($selectedNodes -join ', '))
 Write-Info "Temporary config: $ConfigPath"
 

@@ -1,0 +1,9 @@
+# role_id	mode	region	udp_port	upstream_filter	client_display_name	profile
+# EDGE-US v2 daily HY2 roles. Latency roles are normal daily nodes; bandwidth
+# roles are visible light-throughput canaries, not hidden benchmark-only nodes.
+# Keep this file public-safe: no subscription URLs, UUIDs, tokens, backend
+# paths, passwords, or real server IPs.
+us-direct-hy2	direct	US	443	-	EDGE-US | 美国-VPS直出-HY2	latency
+us-direct-hy2-bandwidth	direct	US	30443	-	EDGE-US | 美国-VPS直出-HY2-带宽	bandwidth
+us-att-hy2	select	US	31443	(?i)(AT&T|ATT|微信kuma|美国.*AT&T|美国.*ATT|AT&T.*家宽|ATT.*家宽)	EDGE-US | 美国-AT&T家宽-HY2	latency
+us-att-hy2-bandwidth	select	US	32443	(?i)(AT&T|ATT|微信kuma|美国.*AT&T|美国.*ATT|AT&T.*家宽|ATT.*家宽)	EDGE-US | 美国-AT&T家宽-HY2-带宽	bandwidth
