@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 
@@ -40,6 +41,7 @@ EDGE_US_V2_ATT_SUB = "edge-us-v2-att"
 EDGE_US_V2_ROLE_SUB = "edge-us-v2-roles"
 EDGE_US_V2_HY2_ROLE_SUB = "edge-us-v2-hy2-roles"
 DEFAULT_EDGE_US_V2_ATT_SOURCE = "edge-us-att"
+EDGE_US_V2_ATT_UPSTREAM_NAME = "AT&T-RESI | 美国-AT&T家宽上游"
 LEGACY_EVOXT_HY2_SUBSCRIPTION = "substore-evoxt-upstream"
 LEGACY_SELF_NODE_COLLECTION_REFS = {
     "merged-airports": {
@@ -144,6 +146,37 @@ def b64decode_padded(text):
 
 def b64encode_text(text):
     return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def rewrite_uri_fragment_name(line, display_name):
+    text = str(line or "").strip()
+    if not text or "://" not in text:
+        return line
+    try:
+        parts = urllib.parse.urlsplit(text)
+    except Exception:
+        return line
+    if parts.scheme not in {"ss", "vless", "trojan", "hysteria2", "hy2"}:
+        return line
+    fragment = urllib.parse.quote(display_name, safe="")
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, fragment))
+
+
+def normalize_proxy_uri_fragment_names(content, display_name):
+    lines = []
+    changed = False
+    for raw in str(content or "").splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            lines.append(raw)
+            continue
+        rewritten = rewrite_uri_fragment_name(stripped, display_name)
+        lines.append(rewritten)
+        changed = changed or rewritten != stripped
+    if not lines:
+        return content
+    suffix = "\n" if str(content or "").endswith("\n") else ""
+    return "\n".join(lines) + suffix
 
 
 def find_named(items, name):
@@ -797,6 +830,10 @@ def ensure_existing_edge_us_v2(data):
 
     att = find_named(subs, EDGE_US_V2_ATT_SUB)
     if att is not None:
+        normalized_content = normalize_proxy_uri_fragment_names(att.get("content", ""), EDGE_US_V2_ATT_UPSTREAM_NAME)
+        if normalized_content != att.get("content", ""):
+            att["content"] = normalized_content
+            changed.append("edge-us-v2-att-content-name-normalized:" + EDGE_US_V2_ATT_SUB)
         for key in ("displayName", "display-name"):
             if att.get(key) != "20-原料-家宽-美国-AT&T-v2":
                 att[key] = "20-原料-家宽-美国-AT&T-v2"
@@ -833,13 +870,16 @@ def clone_edge_us_v2_att(data, source_name):
     display = "20-原料-家宽-美国-AT&T-v2"
     remark = "SJC-ROUTE 的 AT&T 家宽上游原料；只进入 edge-us-v2-upstreams，不直接暴露给客户端。"
     if target is None:
+        initial_content = source.get("content") if source_kind == "local" else ""
+        if source_kind == "local":
+            initial_content = normalize_proxy_uri_fragment_names(initial_content, EDGE_US_V2_ATT_UPSTREAM_NAME)
         target = {
             "name": EDGE_US_V2_ATT_SUB,
             "display-name": display,
             "displayName": display,
             "source": source_kind,
             "url": source.get("url") if source_kind == "remote" else "",
-            "content": source.get("content") if source_kind == "local" else "",
+            "content": initial_content,
             "form": "",
             "ua": "",
             "mergeSources": "",
@@ -860,6 +900,8 @@ def clone_edge_us_v2_att(data, source_name):
             changed.append("edge-us-v2-att-source-synced-from:" + source_name)
         next_url = source.get("url") if source_kind == "remote" else ""
         next_content = source.get("content") if source_kind == "local" else ""
+        if source_kind == "local":
+            next_content = normalize_proxy_uri_fragment_names(next_content, EDGE_US_V2_ATT_UPSTREAM_NAME)
         if target.get("url") != next_url:
             target["url"] = next_url
             changed.append("edge-us-v2-att-url-synced-from:" + source_name)
@@ -877,8 +919,9 @@ def clone_edge_us_v2_att(data, source_name):
         if target.get("url") != "":
             target["url"] = ""
             changed.append("edge-us-v2-att-url-cleared:" + EDGE_US_V2_ATT_SUB)
-        if target.get("content") != source.get("content"):
-            target["content"] = source.get("content")
+        next_content = normalize_proxy_uri_fragment_names(source.get("content"), EDGE_US_V2_ATT_UPSTREAM_NAME)
+        if target.get("content") != next_content:
+            target["content"] = next_content
             changed.append("edge-us-v2-att-content-synced-from:" + source_name)
     for key in ("displayName", "display-name"):
         if target.get(key) != display:

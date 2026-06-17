@@ -1,4 +1,4 @@
 # role_id	mode	region	upstream_filter	client_display_name
 # SJC-ROUTE daily VMess roles. Keep this file public-safe: no subscription
 # URLs, UUIDs, tokens, backend paths, passwords, or real server IPs.
-us-att	select	US	(?i)(AT&T|ATT|微信kuma|美国.*AT&T|美国.*ATT|AT&T.*家宽|ATT.*家宽)	SJC-ROUTE | 美国-AT&T家宽
+us-att	select	US	(?i)(AT&T|ATT|AT&T-RESI|美国.*AT&T|美国.*ATT|AT&T.*家宽|ATT.*家宽|美国.*家宽上游)	SJC-ROUTE | 美国-AT&T家宽

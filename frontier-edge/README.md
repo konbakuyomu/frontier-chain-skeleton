@@ -86,10 +86,11 @@ Keep `edge-us-upstreams` narrow: only put US residential upstreams intended for
 this edge in it. The `美国-家宽自动` role uses the whole collection, while the
 stable `美国-AT&T家宽` role applies a supplier-specific filter.
 
-The AT&T SS URI belongs only in the `edge-us-upstreams` runtime collection. If
-Sub-Store keeps the upstream display name as `微信kuma`, the default
-`US-Edge | 美国-AT&T家宽` role already matches it; if the supplier renames the
-node later, update only `edge-roles.tsv`, regenerate, and patch `edge-us-roles`.
+The AT&T SS URI belongs only in the `edge-us-upstreams` runtime collection. Keep
+the upstream display name objective, currently `AT&T-RESI | 美国-AT&T家宽上游`.
+The default `US-Edge | 美国-AT&T家宽` role matches that stable upstream name; if
+the supplier renames the node later, normalize it back before regenerating and
+patching `edge-us-roles`.
 The AT&T HY2 roles require the same upstream to be reachable from this VPS. If
 the supplier whitelist is removed or the upstream fails, park the AT&T HY2 rows
 in `edge-hy2-roles.tsv`, regenerate, and patch `edge-us-hy2-roles` before

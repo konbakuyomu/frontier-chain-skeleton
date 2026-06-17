@@ -98,6 +98,9 @@ CLIENT_COLLECTION_NAMES = {
 THREE_X_PREFIXES = ("SJC-3X", "MALAYSIA-3X", "OLD-US-3X")
 THREE_X_FORBIDDEN_PREFIXES = ("LAX-3X", "MY-3X")
 EDGE_US_V2_PREFIX = "SJC-ROUTE"
+EDGE_US_V2_ATT_SUB = "edge-us-v2-att"
+EDGE_US_V2_ATT_UPSTREAM_NAME = "AT&T-RESI | 美国-AT&T家宽上游"
+LEGACY_EDGE_US_V2_ATT_UPSTREAM_NAMES = {"微信kuma"}
 RETIRED_VISIBLE_PREFIXES = ("EDGE-US", "US-Edge")
 RULE_MIRROR_HOST = "link.konbakuyomu.us"
 THIRD_PARTY_RULE_PROVIDER_HOSTS = (
@@ -900,6 +903,13 @@ def residential_remote_failure_isolation_gaps(data):
     return gaps
 
 
+def edge_us_v2_att_upstream_names(data):
+    sub = find_named(data.get("subs", []) or [], EDGE_US_V2_ATT_SUB)
+    if not isinstance(sub, dict):
+        return []
+    return extract_proxy_names(str(sub.get("content") or ""))
+
+
 def legacy_daily_collection_refs(data):
     refs = []
     for collection_name in CLIENT_COLLECTION_NAMES:
@@ -1036,6 +1046,11 @@ def main():
     missing_taxonomy = missing_taxonomy_tags(data)
     taxonomy_tag_leaks = taxonomy_subscription_tag_leaks(data)
     residential_isolation_gaps = residential_remote_failure_isolation_gaps(data)
+    edge_us_v2_att_names = edge_us_v2_att_upstream_names(data)
+    edge_us_v2_att_legacy_names = [
+        name for name in edge_us_v2_att_names
+        if name in LEGACY_EDGE_US_V2_ATT_UPSTREAM_NAMES
+    ]
     legacy_refs = legacy_daily_collection_refs(data)
     legacy_self_refs = legacy_self_node_collection_refs(data)
     checks.append(ok(
@@ -1057,6 +1072,14 @@ def main():
         "residential remote upstreams ignore failed fetches",
         not residential_isolation_gaps,
         safe_detail_dict({"gaps": residential_isolation_gaps}),
+    ))
+    checks.append(ok(
+        "SJC-ROUTE AT&T upstream uses objective raw name",
+        EDGE_US_V2_ATT_UPSTREAM_NAME in edge_us_v2_att_names and not edge_us_v2_att_legacy_names,
+        safe_detail_dict({
+            "names": edge_us_v2_att_names,
+            "legacy_names": edge_us_v2_att_legacy_names,
+        }),
     ))
     checks.append(ok(
         "legacy VPS-LA objects are not in daily client collections",
