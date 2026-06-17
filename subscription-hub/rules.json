@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "rules_path_prefix": "/rules",
+  "items": [
+    {
+      "id": "sr-paypal",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-paypal.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/PayPal/PayPal.list"
+    },
+    {
+      "id": "sr-advertising-domain",
+      "client": "shadowrocket",
+      "rule_type": "DOMAIN-SET",
+      "format": "text",
+      "file": "shadowrocket-advertising-domain.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Advertising/Advertising_Domain.list"
+    },
+    {
+      "id": "sr-advertising",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-advertising.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Advertising/Advertising.list"
+    },
+    {
+      "id": "sr-ai",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-ai.list",
+      "source": "https://cdn.jsdelivr.net/gh/LingJingMaster/Shadowrocket-Rules@main/AI.list"
+    },
+    {
+      "id": "sr-google",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-google.list",
+      "source": "https://cdn.jsdelivr.net/gh/LingJingMaster/Shadowrocket-Rules@main/Google.list"
+    },
+    {
+      "id": "sr-youtube",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-youtube.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/YouTube/YouTube.list"
+    },
+    {
+      "id": "sr-lan",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-lan.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Lan/Lan.list"
+    },
+    {
+      "id": "sr-telegram",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-telegram.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Telegram/Telegram.list"
+    },
+    {
+      "id": "sr-github",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-github.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/GitHub/GitHub.list"
+    },
+    {
+      "id": "sr-gitlab",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-gitlab.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/GitLab/GitLab.list"
+    },
+    {
+      "id": "sr-atlassian",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-atlassian.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Atlassian/Atlassian.list"
+    },
+    {
+      "id": "sr-microsoft",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-microsoft.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Microsoft/Microsoft.list"
+    },
+    {
+      "id": "sr-apple-domain",
+      "client": "shadowrocket",
+      "rule_type": "DOMAIN-SET",
+      "format": "text",
+      "file": "shadowrocket-apple-domain.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Apple/Apple_Domain.list"
+    },
+    {
+      "id": "sr-apple",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-apple.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Apple/Apple.list"
+    },
+    {
+      "id": "sr-china-domain",
+      "client": "shadowrocket",
+      "rule_type": "DOMAIN-SET",
+      "format": "text",
+      "file": "shadowrocket-china-domain.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/China/China_Domain.list"
+    },
+    {
+      "id": "sr-china",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-china.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/China/China.list"
+    },
+    {
+      "id": "sr-global-domain",
+      "client": "shadowrocket",
+      "rule_type": "DOMAIN-SET",
+      "format": "text",
+      "file": "shadowrocket-global-domain.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Global/Global_Domain.list"
+    },
+    {
+      "id": "sr-global",
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-global.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Global/Global.list"
+    },
+    {
+      "id": "mihomo-ai-dustin",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "mrs",
+      "file": "mihomo-ai-dustin.mrs",
+      "source": "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.mrs"
+    },
+    {
+      "id": "mihomo-ai-openai",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-ai-openai.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.list"
+    },
+    {
+      "id": "mihomo-ai-claude",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-ai-claude.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.list"
+    },
+    {
+      "id": "mihomo-ai-gemini",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-ai-gemini.list",
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Gemini/Gemini.list"
+    },
+    {
+      "id": "mihomo-paypal-meta",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "mrs",
+      "file": "mihomo-paypal-meta.mrs",
+      "source": "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/paypal.mrs"
+    },
+    {
+      "id": "mihomo-paypal-cn-meta",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "mrs",
+      "file": "mihomo-paypal-cn-meta.mrs",
+      "source": "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/paypal%40cn.mrs"
+    },
+    {
+      "id": "mihomo-gfwlist-loyalsoldier",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-gfwlist-loyalsoldier.txt",
+      "source": "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/gfw.txt"
+    },
+    {
+      "id": "mihomo-adblock-217heidai",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "yaml",
+      "file": "mihomo-adblock-217heidai.yaml",
+      "source": "https://cdn.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblockmihomolite.yaml"
+    },
+    {
+      "id": "mihomo-powerfullz-additional-cdn-resources",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-powerfullz-additional-cdn-resources.list",
+      "source": "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/AdditionalCDNResources.list"
+    },
+    {
+      "id": "mihomo-powerfullz-additional-filter",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-powerfullz-additional-filter.list",
+      "source": "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/AdditionalFilter.list"
+    },
+    {
+      "id": "mihomo-powerfullz-crypto",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-powerfullz-crypto.list",
+      "source": "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/Crypto.list"
+    },
+    {
+      "id": "mihomo-powerfullz-ehentai",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-powerfullz-ehentai.list",
+      "source": "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/EHentai.list"
+    },
+    {
+      "id": "mihomo-powerfullz-googlefcm",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-powerfullz-googlefcm.list",
+      "source": "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/FirebaseCloudMessaging.list"
+    },
+    {
+      "id": "mihomo-powerfullz-steamfix",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-powerfullz-steamfix.list",
+      "source": "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/SteamFix.list"
+    },
+    {
+      "id": "mihomo-powerfullz-tiktok",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-powerfullz-tiktok.list",
+      "source": "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/TikTok.list"
+    },
+    {
+      "id": "mihomo-powerfullz-weibo",
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-powerfullz-weibo.list",
+      "source": "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/Weibo.list"
+    }
+  ]
+}

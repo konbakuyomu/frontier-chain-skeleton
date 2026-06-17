@@ -99,6 +99,12 @@ THREE_X_PREFIXES = ("SJC-3X", "MALAYSIA-3X", "OLD-US-3X")
 THREE_X_FORBIDDEN_PREFIXES = ("LAX-3X", "MY-3X")
 EDGE_US_V2_PREFIX = "SJC-ROUTE"
 RETIRED_VISIBLE_PREFIXES = ("EDGE-US", "US-Edge")
+RULE_MIRROR_HOST = "link.konbakuyomu.us"
+THIRD_PARTY_RULE_PROVIDER_HOSTS = (
+    "cdn.jsdelivr.net",
+    "github.com",
+    "raw.githubusercontent.com",
+)
 DEFAULT_TIMEOUT_RESIDENTIAL_NAMES = [
     "cf加速|越南动态家宽🇻🇳",
     "越南-cf加速 动态 🇻🇳-家宽",
@@ -169,6 +175,28 @@ def docker_running(container):
         return out == "true"
     except Exception:
         return False
+
+
+def load_substore_data(data_path, container):
+    path = Path(data_path)
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8")), "host-path"
+    candidates = [
+        "/opt/app/data/sub-store.json",
+        "/app/data/sub-store.json",
+        "/data/sub-store.json",
+    ]
+    for candidate in candidates:
+        try:
+            out = subprocess.check_output(
+                ["docker", "exec", container, "cat", candidate],
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except Exception:
+            continue
+        return json.loads(out.decode("utf-8")), "container-path"
+    raise FileNotFoundError("sub-store.json not found at host path or known container paths")
 
 
 def read_backend_path(app_dir, container):
@@ -389,6 +417,39 @@ def yaml_safe_load(text):
     return yaml.safe_load(text)
 
 
+def analyze_rule_provider_urls(text):
+    result = {
+        "provider_count": 0,
+        "provider_url_count": 0,
+        "mirror_count": 0,
+        "third_party_count": 0,
+        "third_party_provider_names": [],
+    }
+    try:
+        data = yaml_safe_load(text)
+    except Exception:
+        return result
+    providers = data.get("rule-providers") if isinstance(data, dict) else None
+    if not isinstance(providers, dict):
+        return result
+    result["provider_count"] = len(providers)
+    for name, provider in providers.items():
+        if not isinstance(provider, dict):
+            continue
+        url = str(provider.get("url") or "")
+        if not url:
+            continue
+        result["provider_url_count"] += 1
+        host = urllib.parse.urlparse(url).hostname or ""
+        if host == RULE_MIRROR_HOST and urllib.parse.urlparse(url).path.startswith("/rules/"):
+            result["mirror_count"] += 1
+        if host in THIRD_PARTY_RULE_PROVIDER_HOSTS:
+            result["third_party_count"] += 1
+            result["third_party_provider_names"].append(str(name))
+    result["third_party_provider_names"] = sorted(result["third_party_provider_names"])
+    return result
+
+
 def profile_check(text):
     checker = None
     for candidate in ("mihomo", "clash"):
@@ -573,6 +634,7 @@ def analyze_mihomo_output(text):
         "ai_group_region_residential_refs": group_body_regex_count(visible_proxy_groups, "AI服务", r"🏡 .+?家宽"),
         "paypal_group_region_residential_refs": group_body_regex_count(visible_proxy_groups, "PayPal", r"🏡 .+?家宽"),
         "forbidden_counts": forbidden_counts(visible_text),
+        "rule_provider_urls": analyze_rule_provider_urls(text),
     })
     return quality
 
@@ -951,8 +1013,7 @@ def main():
     args = parser.parse_args()
 
     checks = []
-    data_path = Path(args.data)
-    data = json.loads(data_path.read_text(encoding="utf-8"))
+    data, data_source = load_substore_data(args.data, args.container)
 
     checks.append(ok("docker container running", docker_running(args.container), args.container))
     log_summary, log_error = docker_log_issue_count(args.container, data)
@@ -962,6 +1023,7 @@ def main():
         checks.append(warn("docker logs tail has only tolerated isolated upstream/parser issues", safe_detail_dict(log_summary)))
     else:
         checks.append(ok("docker logs tail has no fatal missing/error/fail", log_summary["fatal_issue_count"] == 0, safe_detail_dict(log_summary)))
+    checks.append(ok("sub-store.json readable", True, data_source))
     checks.append(ok("sub-store.json schemaVersion", data.get("schemaVersion") == "2.0", str(data.get("schemaVersion"))))
 
     subs = data.get("subs", []) or []
@@ -1173,6 +1235,13 @@ def main():
                 checks.append(ok("final mihomo has rules", http["final_mihomo"]["rule_count"] > 1, str(http["final_mihomo"]["rule_count"])))
                 checks.append(ok("final mihomo has DNS", http["final_mihomo"]["has_dns"]))
                 checks.append(ok("final mihomo has rule-providers", http["final_mihomo"]["has_rule_providers"]))
+                checks.append(ok("final mihomo rule-provider URLs use SJC mirror", http["final_mihomo"]["rule_provider_urls"]["third_party_count"] == 0, safe_detail_dict({
+                    "provider_count": http["final_mihomo"]["rule_provider_urls"]["provider_count"],
+                    "provider_url_count": http["final_mihomo"]["rule_provider_urls"]["provider_url_count"],
+                    "mirror_count": http["final_mihomo"]["rule_provider_urls"]["mirror_count"],
+                    "third_party_count": http["final_mihomo"]["rule_provider_urls"]["third_party_count"],
+                    "third_party_provider_names": http["final_mihomo"]["rule_provider_urls"]["third_party_provider_names"][:10],
+                })))
                 checks.append(warn("final mihomo Evoxt/HY2 stats", safe_detail_dict({
                     "evoxt_node_count": http["final_mihomo"]["evoxt_node_count"],
                     "hysteria2_count": http["final_mihomo"]["evoxt_hysteria2_count"],

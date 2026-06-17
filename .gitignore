@@ -8,3 +8,4 @@ __pycache__/
 vps-relay/.secrets.local/
 frontier-edge/.secrets.local/
 shared-hy2/.secrets.local/
+subscription-hub/.secrets.local/

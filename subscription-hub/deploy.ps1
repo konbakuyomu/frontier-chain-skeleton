@@ -1,0 +1,541 @@
+<#
+.SYNOPSIS
+  Render and deploy the SJC subscription entry hub.
+
+.DESCRIPTION
+  Default mode is dry-run. With -Apply, this script uploads generated static
+  files and a standalone managed Caddy site block to SJC, then asks the
+  existing ingress container to reload. It does not mutate Sub-Store objects.
+  With -Disable -Apply, it removes the managed block and stops the sidecar.
+#>
+
+[CmdletBinding()]
+param(
+  [switch]$Apply,
+  [switch]$Disable,
+
+  [string]$SshHost = $env:FRONTIER_SUBSTORE_SSH_HOST,
+  [string]$SshPort = $env:FRONTIER_SUBSTORE_SSH_PORT,
+  [string]$SshUser = $env:FRONTIER_SUBSTORE_SSH_USER,
+  [string]$SshKey = $env:FRONTIER_SUBSTORE_SSH_KEY,
+
+  [string]$EnvFile = $env:HUB_RUNTIME_ENV,
+  [string]$RemoteRoot = '/opt/frontier/subscription-hub',
+  [ValidateSet('caddy', 'openresty')]
+  [string]$IngressKind = $env:HUB_INGRESS_KIND,
+  [string]$CaddyContainer = $env:HUB_CADDY_CONTAINER,
+  [string]$CaddyfilePath = $env:HUB_CADDYFILE_PATH,
+  [string]$SubStoreContainer = $env:HUB_SUBSTORE_CONTAINER,
+  [string]$HubContainerName = $env:HUB_CONTAINER_NAME,
+  [string]$HubDockerNetwork = $env:HUB_DOCKER_NETWORK,
+  [string]$HubCaddyImage = $env:HUB_CADDY_IMAGE,
+  [string]$LegacyRedirectHosts = $env:HUB_LEGACY_REDIRECT_HOSTS,
+  [string]$OpenRestyContainer = $env:HUB_OPENRESTY_CONTAINER,
+  [string]$OpenRestyConfPath = $env:HUB_OPENRESTY_CONF_PATH
+)
+
+$ErrorActionPreference = 'Stop'
+
+if (-not $SshUser) { $SshUser = 'root' }
+
+$HubDir = Split-Path -Parent $PSCommandPath
+$RepoRoot = Split-Path -Parent $HubDir
+if (-not $EnvFile) { $EnvFile = Join-Path $HubDir 'examples\hub.runtime.env.example' }
+$OutDir = Join-Path $HubDir '.secrets.local\out'
+
+function Write-Info($Message) { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
+function Write-Ok($Message) { Write-Host "[ OK ] $Message" -ForegroundColor Green }
+function Write-Warn2($Message) { Write-Host "[WARN] $Message" -ForegroundColor Yellow }
+
+function Get-SshArgs {
+  $args = @()
+  if ($SshKey) { $args += @('-i', $SshKey) }
+  if ($SshPort) { $args += @('-p', $SshPort) }
+  $args += @('-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', "$SshUser@$SshHost")
+  return $args
+}
+
+function Get-ScpArgs {
+  $args = @()
+  if ($SshKey) { $args += @('-i', $SshKey) }
+  if ($SshPort) { $args += @('-P', $SshPort) }
+  $args += @('-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new')
+  return $args
+}
+
+function Quote-Remote($Text) {
+  return "'" + $Text.Replace("'", "'\''") + "'"
+}
+
+function Read-EnvValue($Path, $Key) {
+  if (-not (Test-Path -LiteralPath $Path)) { return '' }
+  foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
+    if ($line -match "^\s*$([regex]::Escape($Key))=(.*)$") {
+      return $Matches[1].Trim().Trim('"').Trim("'")
+    }
+  }
+  return ''
+}
+
+function Write-Utf8NoBom($Path, [string[]]$Lines) {
+  $encoding = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, (($Lines -join [Environment]::NewLine) + [Environment]::NewLine), $encoding)
+}
+
+function Copy-EnvWithOverrides($SourcePath, $DestinationPath, [hashtable]$Overrides) {
+  $lines = Get-Content -LiteralPath $SourcePath -Encoding UTF8
+  $seen = @{}
+  $out = New-Object System.Collections.Generic.List[string]
+  foreach ($line in $lines) {
+    if ($line -match '^\s*([A-Z0-9_]+)=') {
+      $key = $Matches[1]
+      if ($Overrides.ContainsKey($key)) {
+        $out.Add("$key=$($Overrides[$key])")
+        $seen[$key] = $true
+        continue
+      }
+    }
+    $out.Add($line)
+  }
+  foreach ($key in $Overrides.Keys) {
+    if (-not $seen.ContainsKey($key)) {
+      $out.Add("$key=$($Overrides[$key])")
+    }
+  }
+  Write-Utf8NoBom $DestinationPath $out.ToArray()
+}
+
+if (-not (Test-Path -LiteralPath $EnvFile)) { throw "missing env file: $EnvFile" }
+
+$envRemoteRoot = Read-EnvValue $EnvFile 'HUB_REMOTE_ROOT'
+if ($envRemoteRoot) { $RemoteRoot = $envRemoteRoot }
+if (-not $IngressKind) { $IngressKind = Read-EnvValue $EnvFile 'HUB_INGRESS_KIND' }
+if (-not $IngressKind) { $IngressKind = 'caddy' }
+if (-not $CaddyContainer) { $CaddyContainer = Read-EnvValue $EnvFile 'HUB_CADDY_CONTAINER' }
+if (-not $CaddyfilePath) { $CaddyfilePath = Read-EnvValue $EnvFile 'HUB_CADDYFILE_PATH' }
+if (-not $SubStoreContainer) { $SubStoreContainer = Read-EnvValue $EnvFile 'HUB_SUBSTORE_CONTAINER' }
+if (-not $SubStoreContainer) { $SubStoreContainer = 'frontier-sub-store' }
+if (-not $HubContainerName) { $HubContainerName = Read-EnvValue $EnvFile 'HUB_CONTAINER_NAME' }
+if (-not $HubContainerName) { $HubContainerName = 'subscription-hub' }
+if (-not $HubDockerNetwork) { $HubDockerNetwork = Read-EnvValue $EnvFile 'HUB_DOCKER_NETWORK' }
+if (-not $HubDockerNetwork) { $HubDockerNetwork = 'frontier-sub-store_default' }
+if (-not $HubCaddyImage) { $HubCaddyImage = Read-EnvValue $EnvFile 'HUB_CADDY_IMAGE' }
+if (-not $HubCaddyImage) { $HubCaddyImage = 'caddy:2.10.0-alpine' }
+if (-not $LegacyRedirectHosts) { $LegacyRedirectHosts = Read-EnvValue $EnvFile 'HUB_LEGACY_REDIRECT_HOSTS' }
+if (-not $OpenRestyContainer) { $OpenRestyContainer = Read-EnvValue $EnvFile 'HUB_OPENRESTY_CONTAINER' }
+if (-not $OpenRestyConfPath) { $OpenRestyConfPath = Read-EnvValue $EnvFile 'HUB_OPENRESTY_CONF_PATH' }
+$PublicBaseUrl = Read-EnvValue $EnvFile 'HUB_PUBLIC_BASE_URL'
+if (-not $PublicBaseUrl) { throw 'HUB_PUBLIC_BASE_URL is required' }
+$PublicHost = ([Uri]$PublicBaseUrl).Host
+$HubPagePath = Read-EnvValue $EnvFile 'HUB_PAGE_PATH'
+if (-not $HubPagePath) { throw 'HUB_PAGE_PATH is required' }
+
+Write-Info "repo root: $RepoRoot"
+Write-Info "env file: $EnvFile"
+Write-Info "remote root: $RemoteRoot"
+Write-Info "public host: $PublicHost"
+Write-Info "ingress kind: $IngressKind"
+Write-Info "caddy container: $(if($CaddyContainer){'configured'}else{'missing'})"
+Write-Info "caddyfile path: $(if($CaddyfilePath){'configured'}else{'missing'})"
+Write-Info "sub-store container: $(if($SubStoreContainer){'configured'}else{'missing'})"
+Write-Info "hub container: $HubContainerName"
+Write-Info "hub docker network: $HubDockerNetwork"
+Write-Info "legacy redirect hosts: $(if($LegacyRedirectHosts){'configured'}else{'missing'})"
+Write-Info "openresty container: $(if($OpenRestyContainer){'configured'}else{'missing'})"
+Write-Info "openresty conf path: $(if($OpenRestyConfPath){'configured'}else{'missing'})"
+
+if ($Disable) {
+  if ($IngressKind -ne 'caddy') { throw '-Disable is currently supported only for caddy ingress' }
+  if (-not $Apply) {
+    Write-Host ''
+    Write-Host '===== DISABLE DRY RUN =====' -ForegroundColor Magenta
+    Write-Host 'No remote files were changed. Re-run with -Disable -Apply to remove the managed Caddy block and stop the hub sidecar.'
+    exit 0
+  }
+  if (-not $SshHost) { throw 'FRONTIER_SUBSTORE_SSH_HOST or -SshHost is required with -Disable -Apply' }
+  if (-not $CaddyContainer) { throw 'HUB_CADDY_CONTAINER is required with -Disable -Apply' }
+  if (-not $CaddyfilePath) { throw 'HUB_CADDYFILE_PATH is required with -Disable -Apply' }
+
+  $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $sshArgs = Get-SshArgs
+  $remoteScript = @"
+set -eu
+umask 077
+REMOTE_ROOT=$(Quote-Remote $RemoteRoot)
+CADDYFILE=$(Quote-Remote $CaddyfilePath)
+CONTAINER=$(Quote-Remote $CaddyContainer)
+HUB_CONTAINER=$(Quote-Remote $HubContainerName)
+STAMP=$runId
+mkdir -p "`$REMOTE_ROOT/backups"
+if [ -f "`$CADDYFILE" ]; then
+  cp -p "`$CADDYFILE" "`$REMOTE_ROOT/backups/Caddyfile.bak-disable-`$STAMP"
+fi
+python3 - "`$CADDYFILE" <<'PY'
+from pathlib import Path
+import sys
+conf = Path(sys.argv[1])
+text = conf.read_text(encoding='utf-8') if conf.exists() else ''
+start = '# BEGIN subscription-hub managed block'
+end = '# END subscription-hub managed block'
+removed = 0
+while start in text and end in text:
+    before, rest = text.split(start, 1)
+    _, after = rest.split(end, 1)
+    text = before.rstrip() + '\n' + after.lstrip()
+    removed += 1
+conf.write_text(text, encoding='utf-8')
+print('managed_blocks_removed=' + str(removed))
+PY
+docker rm -f "`$HUB_CONTAINER" >/dev/null 2>&1 || true
+if ! docker exec "`$CONTAINER" caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+  cp -p "`$REMOTE_ROOT/backups/Caddyfile.bak-disable-`$STAMP" "`$CADDYFILE"
+  echo "ERROR: Caddy validate failed; restored backup" >&2
+  exit 3
+fi
+docker exec "`$CONTAINER" caddy reload --config /etc/caddy/Caddyfile >/dev/null
+echo "hub_container=stopped"
+echo "caddy_reload=ok"
+"@
+  Write-Info 'disabling managed subscription hub block on remote host'
+  & ssh @sshArgs $remoteScript
+  if ($LASTEXITCODE -ne 0) { throw 'remote disable failed' }
+  Write-Ok 'remote disable completed'
+  exit 0
+}
+
+$RenderEnvFile = $EnvFile
+if ($IngressKind -eq 'caddy') {
+  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+  $RenderEnvFile = Join-Path $OutDir 'hub.runtime.render.env'
+  Copy-EnvWithOverrides $EnvFile $RenderEnvFile @{
+    HUB_LOCAL_SERVICE_URL = "http://${HubContainerName}:19180"
+  }
+  Write-Info 'caddy hub upstream: sidecar container'
+}
+
+$renderArgs = @((Join-Path $HubDir 'render.py'), '--env-file', $RenderEnvFile, '--out-dir', $OutDir)
+if ($Apply) { $renderArgs += '--strict' }
+& python @renderArgs
+if ($LASTEXITCODE -ne 0) { throw 'render failed' }
+Write-Ok 'rendered hub artifacts'
+
+if (-not $Apply) {
+  Write-Host ''
+  Write-Host '===== DRY RUN =====' -ForegroundColor Magenta
+  Write-Host 'No remote files were changed. Re-run with -Apply after reviewing the plan.'
+  Get-Content -LiteralPath (Join-Path $OutDir 'manifest.safe.json') -Encoding UTF8
+  exit 0
+}
+
+if (-not $SshHost) { throw 'FRONTIER_SUBSTORE_SSH_HOST or -SshHost is required with -Apply' }
+if ($IngressKind -eq 'caddy') {
+  if (-not $CaddyContainer) { throw 'HUB_CADDY_CONTAINER is required with -Apply' }
+  if (-not $CaddyfilePath) { throw 'HUB_CADDYFILE_PATH is required with -Apply' }
+} else {
+  if (-not $OpenRestyContainer) { throw 'HUB_OPENRESTY_CONTAINER is required with -Apply' }
+  if (-not $OpenRestyConfPath) { throw 'HUB_OPENRESTY_CONF_PATH is required with -Apply' }
+}
+
+$runId = Get-Date -Format 'yyyyMMdd-HHmmss'
+$remoteStage = "/tmp/subscription-hub-$runId"
+$sshArgs = Get-SshArgs
+$scpArgs = Get-ScpArgs
+
+Write-Info 'creating remote staging'
+& ssh @sshArgs ("mkdir -p " + (Quote-Remote $remoteStage))
+if ($LASTEXITCODE -ne 0) { throw 'ssh mkdir failed' }
+
+try {
+  Write-Info 'uploading rendered artifacts'
+  $bundle = Join-Path $OutDir "subscription-hub-bundle-$runId.tgz"
+  $runtimeEnvCopy = Join-Path $OutDir 'secrets\hub.runtime.env'
+  Copy-Item -LiteralPath $RenderEnvFile -Destination $runtimeEnvCopy -Force
+  tar -czf $bundle -C $OutDir public app secrets ingress subscription-hub.service subscription-rule-mirror.service subscription-rule-mirror.timer
+  if ($LASTEXITCODE -ne 0) { throw 'local tar bundle failed' }
+  & scp @scpArgs $bundle "${SshUser}@${SshHost}:$remoteStage/subscription-hub-bundle.tgz"
+  if ($LASTEXITCODE -ne 0) { throw 'scp bundle failed' }
+
+  if ($IngressKind -eq 'caddy') {
+    $remoteScript = @"
+set -eu
+umask 077
+REMOTE_ROOT=$(Quote-Remote $RemoteRoot)
+CADDYFILE=$(Quote-Remote $CaddyfilePath)
+CONTAINER=$(Quote-Remote $CaddyContainer)
+SUBSTORE_CONTAINER=$(Quote-Remote $SubStoreContainer)
+HUB_CONTAINER=$(Quote-Remote $HubContainerName)
+HUB_NETWORK=$(Quote-Remote $HubDockerNetwork)
+HUB_IMAGE=$(Quote-Remote $HubCaddyImage)
+PUBLIC_HOST=$(Quote-Remote $PublicHost)
+PUBLIC_BASE_URL=$(Quote-Remote $PublicBaseUrl)
+PAGE_PATH=$(Quote-Remote $HubPagePath)
+LEGACY_REDIRECT_HOSTS=$(Quote-Remote $LegacyRedirectHosts)
+STAGE=$(Quote-Remote $remoteStage)
+STAMP=$runId
+tar -xzf "`$STAGE/subscription-hub-bundle.tgz" -C "`$STAGE"
+mkdir -p "`$REMOTE_ROOT/public" "`$REMOTE_ROOT/secrets" "`$REMOTE_ROOT/ingress" "`$REMOTE_ROOT/app" "`$REMOTE_ROOT/backups"
+if [ -f "`$CADDYFILE" ]; then
+  cp -p "`$CADDYFILE" "`$REMOTE_ROOT/backups/Caddyfile.bak-`$STAMP"
+fi
+if [ -d "`$REMOTE_ROOT/public" ]; then
+  tar -C "`$REMOTE_ROOT" -czf "`$REMOTE_ROOT/backups/public.bak-`$STAMP.tgz" public
+fi
+cp -p "`$STAGE"/public/index.html "`$REMOTE_ROOT/public/index.html"
+cp -p "`$STAGE"/public/links.json "`$REMOTE_ROOT/public/links.json"
+cp -p "`$STAGE"/public/status.json "`$REMOTE_ROOT/public/status.json"
+cp -p "`$STAGE"/public/shadowrocket.conf "`$REMOTE_ROOT/public/shadowrocket.conf"
+cp -p "`$STAGE"/public/qr-*.svg "`$REMOTE_ROOT/public/"
+mkdir -p "`$REMOTE_ROOT/public/rules"
+cp -p "`$STAGE"/public/rules/status.json "`$REMOTE_ROOT/public/rules/status.json"
+cp -p "`$STAGE"/app/server.py "`$REMOTE_ROOT/app/server.py"
+cp -p "`$STAGE"/app/rule_mirror.py "`$REMOTE_ROOT/app/rule_mirror.py"
+cp -p "`$STAGE"/app/rules.json "`$REMOTE_ROOT/app/rules.json"
+chmod 700 "`$REMOTE_ROOT/app/server.py"
+chmod 700 "`$REMOTE_ROOT/app/rule_mirror.py"
+BACKEND_PATH="`$(docker inspect "`$SUBSTORE_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' | awk -F= '/SUB_STORE_FRONTEND_BACKEND_PATH|SUB_STORE_BACKEND_PATH/{print `$2; exit}')"
+if [ -z "`$BACKEND_PATH" ]; then
+  echo "ERROR: Sub-Store backend path not found" >&2
+  exit 2
+fi
+python3 - "`$STAGE"/secrets/hub.runtime.env "`$REMOTE_ROOT/secrets/hub.runtime.env" "`$BACKEND_PATH" <<'PY'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+backend = sys.argv[3]
+lines = []
+seen = False
+for line in src.read_text(encoding='utf-8').splitlines():
+    if line.startswith('SUBSTORE_BACKEND_PATH='):
+        lines.append('SUBSTORE_BACKEND_PATH=' + backend)
+        seen = True
+    else:
+        lines.append(line)
+if not seen:
+    lines.append('SUBSTORE_BACKEND_PATH=' + backend)
+text = '\n'.join(lines) + '\n'
+if '<' in text or '>' in text:
+    raise SystemExit('runtime env still contains placeholder text')
+dst.write_text(text, encoding='utf-8')
+PY
+chmod 600 "`$REMOTE_ROOT/secrets/hub.runtime.env"
+if [ -f "`$STAGE"/secrets/Caddyfile.auth ]; then
+  cp -p "`$STAGE"/secrets/Caddyfile.auth "`$REMOTE_ROOT/secrets/Caddyfile.auth"
+  chmod 600 "`$REMOTE_ROOT/secrets/Caddyfile.auth"
+fi
+cp -p "`$STAGE"/ingress/subscription-hub.Caddyfile "`$REMOTE_ROOT/ingress/subscription-hub.Caddyfile"
+cp -p "`$STAGE"/ingress/internal.Caddyfile "`$REMOTE_ROOT/ingress/internal.Caddyfile"
+cp -p "`$STAGE"/subscription-rule-mirror.service /etc/systemd/system/subscription-rule-mirror.service
+cp -p "`$STAGE"/subscription-rule-mirror.timer /etc/systemd/system/subscription-rule-mirror.timer
+USER_VALUE="`$(awk -F= '/^HUB_BASIC_AUTH_USER=/{print `$2; exit}' "`$REMOTE_ROOT/secrets/hub.runtime.env")"
+PASS_VALUE="`$(awk -F= '/^HUB_BASIC_AUTH_PASSWORD=/{print `$2; exit}' "`$REMOTE_ROOT/secrets/hub.runtime.env")"
+if [ -z "`$USER_VALUE" ] || [ -z "`$PASS_VALUE" ]; then
+  echo "ERROR: Basic Auth runtime values missing" >&2
+  exit 5
+fi
+HASH_VALUE="`$(docker run --rm "`$HUB_IMAGE" caddy hash-password --plaintext "`$PASS_VALUE")"
+cat > "`$REMOTE_ROOT/secrets/caddy.env" <<EOF
+HUB_BASIC_AUTH_USER=`$USER_VALUE
+HUB_BASIC_AUTH_HASH=`$HASH_VALUE
+SUBSTORE_BACKEND_PATH=`$BACKEND_PATH
+EOF
+chmod 600 "`$REMOTE_ROOT/secrets/caddy.env"
+systemctl disable --now subscription-hub.service >/dev/null 2>&1 || true
+docker rm -f "`$HUB_CONTAINER" >/dev/null 2>&1 || true
+docker run -d \
+  --name "`$HUB_CONTAINER" \
+  --restart unless-stopped \
+  --network "`$HUB_NETWORK" \
+  --env-file "`$REMOTE_ROOT/secrets/caddy.env" \
+  -v "`$REMOTE_ROOT/public:/srv/public:ro" \
+  -v "`$REMOTE_ROOT/ingress/internal.Caddyfile:/etc/caddy/Caddyfile:ro" \
+  "`$HUB_IMAGE" >/dev/null
+systemctl daemon-reload
+systemctl enable --now subscription-rule-mirror.timer >/dev/null
+systemctl start subscription-rule-mirror.service
+python3 - "`$CADDYFILE" "`$REMOTE_ROOT/ingress/subscription-hub.Caddyfile" "`$PUBLIC_BASE_URL" "`$PAGE_PATH" "`$LEGACY_REDIRECT_HOSTS" <<'PY'
+from pathlib import Path
+import sys
+conf = Path(sys.argv[1])
+frag = Path(sys.argv[2]).read_text(encoding='utf-8')
+public_base = sys.argv[3].rstrip('/')
+page_path = sys.argv[4].rstrip('/')
+legacy_hosts = [part.strip().lower() for part in sys.argv[5].replace(',', ' ').split() if part.strip()]
+text = conf.read_text(encoding='utf-8') if conf.exists() else ''
+
+def remove_blocks(value, start, end):
+    removed = 0
+    while start in value and end in value:
+        before, rest = value.split(start, 1)
+        _, after = rest.split(end, 1)
+        value = before.rstrip() + '\n' + after.lstrip()
+        removed += 1
+    return value, removed
+
+text, managed_removed = remove_blocks(
+    text,
+    '# BEGIN subscription-hub managed block',
+    '# END subscription-hub managed block',
+)
+text, legacy_removed = remove_blocks(
+    text,
+    '# BEGIN subscription-hub legacy redirect block',
+    '# END subscription-hub legacy redirect block',
+)
+text = (text.rstrip() + '\n\n' + frag.rstrip() + '\n') if text.strip() else (frag.rstrip() + '\n')
+
+if legacy_hosts:
+    lines = text.splitlines(keepends=True)
+    inserts = []
+    matched_hosts = set()
+    depth = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        before_depth = depth
+        if before_depth == 0 and stripped.endswith('{') and not stripped.startswith('{'):
+            label = stripped.split('{', 1)[0].strip()
+            labels = [part.strip().rstrip(',').lower() for part in label.split(',')]
+            matched = [host for host in legacy_hosts if host in labels]
+            if matched:
+                matched_hosts.update(matched)
+                close = None
+                local_depth = 0
+                for j in range(i, len(lines)):
+                    before_local = local_depth
+                    local_depth += lines[j].count('{') - lines[j].count('}')
+                    if j > i and before_local > 0 and local_depth == 0:
+                        close = j
+                        break
+                if close is None:
+                    raise SystemExit('legacy redirect target site block is not closed')
+                insert_at = close
+                rel_depth = 0
+                for j in range(i + 1, close):
+                    s = lines[j].strip()
+                    if rel_depth == 0 and (
+                        s.startswith('@')
+                        or s.startswith('handle')
+                        or s.startswith('route')
+                        or s.startswith('respond')
+                        or s.startswith('redir')
+                        or s.startswith('reverse_proxy')
+                        or s.startswith('file_server')
+                        or s.startswith('root ')
+                    ):
+                        insert_at = j
+                        break
+                    rel_depth += lines[j].count('{') - lines[j].count('}')
+                block = (
+                    '    # BEGIN subscription-hub legacy redirect block\n'
+                    f'    @subscriptionHubLegacyExact path {page_path}\n'
+                    '    handle @subscriptionHubLegacyExact {\n'
+                    f'        redir {public_base}{page_path}/ 302\n'
+                    '    }\n'
+                    f'    @subscriptionHubLegacyTree path {page_path}/*\n'
+                    '    handle @subscriptionHubLegacyTree {\n'
+                    f'        redir {public_base}{{uri}} 302\n'
+                    '    }\n'
+                    '    # END subscription-hub legacy redirect block\n\n'
+                )
+                inserts.append((insert_at, block))
+        depth += line.count('{') - line.count('}')
+    missing = [host for host in legacy_hosts if host not in matched_hosts]
+    if missing:
+        raise SystemExit('legacy redirect host site block was not found')
+    for insert_at, block in sorted(inserts, key=lambda item: item[0], reverse=True):
+        lines.insert(insert_at, block)
+    text = ''.join(lines)
+
+conf.write_text(text, encoding='utf-8')
+print('caddy_mode=standalone-site')
+print('managed_blocks_removed=' + str(managed_removed))
+print('legacy_blocks_removed=' + str(legacy_removed))
+print('legacy_redirect_hosts=' + str(len(legacy_hosts)))
+PY
+CODE=
+for i in 1 2 3 4 5; do
+  if docker exec "`$CONTAINER" wget -q -O /dev/null "http://`$HUB_CONTAINER:19180/healthz"; then
+    CODE=200
+    echo "local_hub=200"
+    break
+  fi
+  sleep 1
+done
+if [ "`${CODE:-}" != "200" ]; then
+  echo "ERROR: local hub health check failed" >&2
+  exit 4
+fi
+if ! docker exec "`$CONTAINER" caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+  cp -p "`$REMOTE_ROOT/backups/Caddyfile.bak-`$STAMP" "`$CADDYFILE"
+  echo "ERROR: Caddy validate failed; restored backup" >&2
+  exit 3
+fi
+docker exec "`$CONTAINER" caddy reload --config /etc/caddy/Caddyfile >/dev/null
+echo "backup_dir=`$REMOTE_ROOT/backups"
+echo "installed=ok"
+"@
+  } else {
+    $remoteScript = @"
+set -eu
+umask 077
+REMOTE_ROOT=$(Quote-Remote $RemoteRoot)
+CONF_PATH=$(Quote-Remote $OpenRestyConfPath)
+CONTAINER=$(Quote-Remote $OpenRestyContainer)
+STAGE=$(Quote-Remote $remoteStage)
+STAMP=$runId
+mkdir -p "`$REMOTE_ROOT/public" "`$REMOTE_ROOT/secrets" "`$REMOTE_ROOT/ingress" "`$REMOTE_ROOT/app" "`$REMOTE_ROOT/backups"
+if [ -f "`$CONF_PATH" ]; then
+  cp -p "`$CONF_PATH" "`$REMOTE_ROOT/backups/site.conf.bak-`$STAMP"
+fi
+if [ -d "`$REMOTE_ROOT/public" ]; then
+  tar -C "`$REMOTE_ROOT" -czf "`$REMOTE_ROOT/backups/public.bak-`$STAMP.tgz" public
+fi
+cp -p "`$STAGE"/public/index.html "`$REMOTE_ROOT/public/index.html"
+cp -p "`$STAGE"/public/links.json "`$REMOTE_ROOT/public/links.json"
+cp -p "`$STAGE"/public/status.json "`$REMOTE_ROOT/public/status.json"
+cp -p "`$STAGE"/public/shadowrocket.conf "`$REMOTE_ROOT/public/shadowrocket.conf"
+cp -p "`$STAGE"/public/qr-*.svg "`$REMOTE_ROOT/public/"
+mkdir -p "`$REMOTE_ROOT/public/rules"
+cp -p "`$STAGE"/public/rules/status.json "`$REMOTE_ROOT/public/rules/status.json"
+cp -p "`$STAGE"/app/rule_mirror.py "`$REMOTE_ROOT/app/rule_mirror.py"
+cp -p "`$STAGE"/app/rules.json "`$REMOTE_ROOT/app/rules.json"
+chmod 700 "`$REMOTE_ROOT/app/rule_mirror.py"
+cp -p "`$STAGE"/subscription-rule-mirror.service /etc/systemd/system/subscription-rule-mirror.service
+cp -p "`$STAGE"/subscription-rule-mirror.timer /etc/systemd/system/subscription-rule-mirror.timer
+cp -p "`$STAGE"/secrets/htpasswd "`$REMOTE_ROOT/secrets/htpasswd"
+chmod 600 "`$REMOTE_ROOT/secrets/htpasswd"
+cp -p "`$STAGE"/ingress/subscription-hub.nginx.conf "`$REMOTE_ROOT/ingress/subscription-hub.nginx.conf"
+systemctl daemon-reload
+systemctl enable --now subscription-rule-mirror.timer >/dev/null
+systemctl start subscription-rule-mirror.service
+python3 - "`$CONF_PATH" "`$REMOTE_ROOT/ingress/subscription-hub.nginx.conf" <<'PY'
+from pathlib import Path
+import sys
+conf = Path(sys.argv[1])
+frag = Path(sys.argv[2]).read_text(encoding='utf-8')
+text = conf.read_text(encoding='utf-8') if conf.exists() else ''
+start = '# BEGIN subscription-hub managed block'
+end = '# END subscription-hub managed block'
+if start in text and end in text:
+    before, rest = text.split(start, 1)
+    _, after = rest.split(end, 1)
+    text = before.rstrip() + '\n\n' + frag.rstrip() + '\n' + after
+else:
+    insert = text.rstrip() + '\n\n' + frag if text.strip() else frag
+    text = insert
+conf.write_text(text, encoding='utf-8')
+PY
+docker exec "`$CONTAINER" openresty -t >/dev/null
+docker exec "`$CONTAINER" openresty -s reload
+echo "backup_dir=`$REMOTE_ROOT/backups"
+echo "installed=ok"
+"@
+  }
+  Write-Info 'installing hub on remote host'
+  & ssh @sshArgs $remoteScript
+  if ($LASTEXITCODE -ne 0) { throw 'remote install failed' }
+  Write-Ok 'remote install completed'
+} finally {
+  $cleanupCmd = "rm -f " + (Quote-Remote "$remoteStage/subscription-hub.nginx.conf") + " 2>/dev/null || true"
+  & ssh @sshArgs $cleanupCmd | Out-Null
+}

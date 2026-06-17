@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>订阅入口中心</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #17202a;
+      --muted: #607080;
+      --line: #d7dde4;
+      --accent: #1463ff;
+      --ok: #168a4a;
+      --warn: #9a5a00;
+      --bad: #b3261e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    main {
+      width: min(1040px, calc(100vw - 32px));
+      margin: 28px auto 40px;
+    }
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      text-align: right;
+    }
+    section, .login {
+      margin-top: 16px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .item-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .name {
+      font-weight: 650;
+      word-break: break-word;
+    }
+    .desc, .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 2px;
+    }
+    .status {
+      flex: 0 0 auto;
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+    .status.ok { color: var(--ok); border-color: #a8d8bd; background: #edf8f2; }
+    .status.warn { color: var(--warn); border-color: #e4c789; background: #fff8e8; }
+    .status.bad { color: var(--bad); border-color: #efb1ac; background: #fff1f0; }
+    .url-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      align-items: center;
+    }
+    code {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #f8fafc;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+    }
+    button, a.open, input {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #fff;
+      color: var(--text);
+      text-decoration: none;
+      font: inherit;
+      font-size: 13px;
+    }
+    button, a.open {
+      cursor: pointer;
+      min-width: 50px;
+      text-align: center;
+    }
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    .login form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+      margin-top: 12px;
+    }
+    label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .qr {
+      display: none;
+      width: 164px;
+      height: 164px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      background: #fff;
+    }
+    .qr.show { display: block; }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      padding: 9px 12px;
+      border-radius: 7px;
+      background: #111827;
+      color: #fff;
+      font-size: 13px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .16s ease;
+    }
+    .toast.show { opacity: 1; }
+    .hidden { display: none; }
+    @media (max-width: 760px) {
+      main { width: min(100vw - 20px, 640px); margin-top: 18px; }
+      header { display: block; }
+      .meta { margin-top: 8px; text-align: left; }
+      .grid { grid-template-columns: 1fr; }
+      .url-row { grid-template-columns: 1fr auto; }
+      .url-row .open { display: none; }
+      .login form { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>订阅入口中心</h1>
+        <div class="hint">登录后复制当前可用的客户端订阅入口。</div>
+      </div>
+      <div class="meta">
+        最后生成：<span id="generated-at">{{generated_at}}</span><br>
+        最后验证：<span id="verified-at">{{verified_at}}</span>
+      </div>
+    </header>
+
+    <div class="login" id="login-panel">
+      <h2>登录</h2>
+      <div class="hint">使用运行态配置里的入口账号和密码。登录信息只保存在当前浏览器标签页。</div>
+      <form id="login-form">
+        <label>账号
+          <input id="username" autocomplete="username" required>
+        </label>
+        <label>密码
+          <input id="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="primary" type="submit">登录</button>
+      </form>
+      <div class="hint" id="login-error" role="alert"></div>
+    </div>
+
+    <section class="hidden" id="mihomo-section">
+      <h2>Windows / Android / 路由器</h2>
+      <div class="grid" id="mihomo-items"></div>
+    </section>
+
+    <section class="hidden" id="shadowrocket-section">
+      <h2>iPhone Shadowrocket</h2>
+      <div class="grid" id="shadowrocket-items"></div>
+    </section>
+  </main>
+  <div class="toast" id="toast">已复制</div>
+  <script>
+    const linksPath = '{{links_path}}';
+    const statusPath = '{{status_path}}';
+    let authHeader = '';
+
+    function showToast(text) {
+      const toast = document.getElementById('toast');
+      toast.textContent = text;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1400);
+    }
+    async function copyUrl(id) {
+      const text = document.getElementById(id).dataset.url;
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('已复制订阅链接');
+      } catch (error) {
+        window.prompt('复制这条链接', text);
+      }
+    }
+    function toggleQr(id) {
+      const img = document.getElementById('qr-' + id);
+      img.classList.toggle('show');
+    }
+    function statusClass(status) {
+      if (status === 'ok' || status === 'generated') return 'ok';
+      if (status === 'failed') return 'bad';
+      return 'warn';
+    }
+    function safeId(id) {
+      return String(id || '').replace(/[^A-Za-z0-9_-]/g, '-');
+    }
+    function renderItem(item) {
+      const id = safeId(item.id);
+      const article = document.createElement('article');
+      article.className = 'item';
+      article.innerHTML = `
+        <div class="item-head">
+          <div>
+            <div class="name"></div>
+            <div class="desc"></div>
+          </div>
+          <span class="status"></span>
+        </div>
+        <div class="url-row">
+          <code id="${id}"></code>
+          <button class="primary" type="button">复制</button>
+          <a class="open">打开</a>
+        </div>
+        <button type="button">显示二维码</button>
+        <img class="qr" id="qr-${id}" alt="二维码">
+      `;
+      article.querySelector('.name').textContent = item.title || '';
+      article.querySelector('.desc').textContent = item.description || '';
+      const status = String(item.status || 'unknown');
+      const statusEl = article.querySelector('.status');
+      statusEl.textContent = status;
+      statusEl.classList.add(statusClass(status));
+      const code = article.querySelector('code');
+      code.dataset.url = item.url || '';
+      code.textContent = item.url || '';
+      article.querySelector('.primary').addEventListener('click', () => copyUrl(id));
+      const open = article.querySelector('.open');
+      open.href = item.url || '#';
+      const img = article.querySelector('.qr');
+      img.src = item.qr || '';
+      article.querySelector('button:not(.primary)').addEventListener('click', () => toggleQr(id));
+      return article;
+    }
+    function renderLinks(data) {
+      document.getElementById('generated-at').textContent = data.generated_at || '';
+      document.getElementById('verified-at').textContent = data.verified_at || '';
+      const mihomo = document.getElementById('mihomo-items');
+      const shadowrocket = document.getElementById('shadowrocket-items');
+      mihomo.textContent = '';
+      shadowrocket.textContent = '';
+      for (const item of data.items || []) {
+        const target = item.group === 'mihomo' ? mihomo : shadowrocket;
+        target.appendChild(renderItem(item));
+      }
+      document.getElementById('login-panel').classList.add('hidden');
+      document.getElementById('mihomo-section').classList.remove('hidden');
+      document.getElementById('shadowrocket-section').classList.remove('hidden');
+    }
+    function mergeStatus(links, status) {
+      const byId = new Map((status.items || []).map(item => [item.id, item]));
+      return {
+        ...links,
+        generated_at: status.generated_at || links.generated_at,
+        verified_at: status.verified_at || links.verified_at,
+        items: (links.items || []).map(item => ({ ...item, ...(byId.get(item.id) || {}) }))
+      };
+    }
+    async function loadLinks() {
+      const headers = {};
+      if (authHeader) headers.Authorization = authHeader;
+      const res = await fetch(linksPath, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const links = await res.json();
+      const statusRes = await fetch(statusPath, { cache: 'no-store', credentials: 'same-origin', headers });
+      if (statusRes.ok) renderLinks(mergeStatus(links, await statusRes.json()));
+      else renderLinks(links);
+    }
+    document.getElementById('login-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const user = document.getElementById('username').value;
+      const pass = document.getElementById('password').value;
+      authHeader = 'Basic ' + btoa(unescape(encodeURIComponent(user + ':' + pass)));
+      document.getElementById('login-error').textContent = '';
+      try {
+        await loadLinks();
+        showToast('登录成功');
+      } catch (error) {
+        authHeader = '';
+        document.getElementById('login-error').textContent = '登录失败，请检查账号和密码。';
+      }
+    });
+    loadLinks().catch(() => {});
+  </script>
+</body>
+</html>

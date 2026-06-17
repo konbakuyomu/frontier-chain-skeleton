@@ -26,7 +26,7 @@ param(
 
   [string]$SubStoreDir = '/opt/1panel/apps/sub-store/sub-store',
   [string]$SubStoreDataPath = '',
-  [string]$ContainerName = 'sub-store',
+  [string]$ContainerName = 'frontier-sub-store',
   [string]$CollectionName = 'merged-airports',
   [string]$MihomoFileName = 'frontier-chain-mihomo',
   [string]$IosAirportsCollection = 'ios-airports-uri',

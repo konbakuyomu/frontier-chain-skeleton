@@ -151,9 +151,9 @@ Remove-Item Env:\FRONTIER_EXPECTED_BACKEND_PATH
 
 Shadowrocket 仍使用双订阅：
 
-1. 配置订阅：`shadowrocket.conf` 的 commit-pinned jsDelivr URL。
-2. 普通机场/家宽节点订阅：VPS/Sub-Store 的 `/download/collection/ios-airports-uri?target=URI`。
-3. HY2 专用节点订阅：VPS/Sub-Store 的 `/download/collection/ios-evoxt-hy2-shadowrocket?target=ShadowRocket`。
+1. 配置订阅：SJC 订阅入口中心提供的稳定 Shadowrocket 配置链接。
+2. 普通机场/家宽节点订阅：SJC 订阅入口中心提供的普通节点链接，内部反代到 Sub-Store `/download/collection/ios-airports-uri?target=URI`。
+3. HY2 专用节点订阅：SJC 订阅入口中心提供的 HY2 节点链接，内部反代到 Sub-Store `/download/collection/ios-evoxt-hy2-shadowrocket?target=ShadowRocket`。
 
 客户端订阅 URL 形态必须区分 File API 和 Collection 下载口：
 
@@ -179,13 +179,13 @@ Shadowrocket HY2 专用节点:
 
 `shadowrocket.conf` 中的 `🏡 家宽选择` 是手动 selector。用户在这个 selector 内选择具体家宽节点；AI / PayPal 等业务组保持选中 `🏡 家宽选择` 即可。
 
-不要把 jsDelivr 的 `@main/shadowrocket.conf` branch ref 作为 iPhone 长期配置订阅。jsDelivr 对 branch ref 有缓存，Shadowrocket 也可能保留旧配置；正式发布后使用：
+不要把 jsDelivr 的 `@main/shadowrocket.conf` branch ref 作为 iPhone 长期配置订阅。jsDelivr 对 branch ref 有缓存，Shadowrocket 也可能保留旧配置；现在给小白使用的正式入口是 SJC 订阅入口中心里的稳定 Shadowrocket 配置链接。
 
 ```text
-https://cdn.jsdelivr.net/gh/konbakuyomu/frontier-chain-skeleton@<COMMIT>/shadowrocket.conf
+https://<SUBSCRIPTION_HUB_PUBLIC_HOST>/<OPAQUE_SHADOWROCKET_CONFIG_PATH>
 ```
 
-同理，`shadowrocket.conf` 内部不要再引用本仓库的 `@main` 资源。少量自有规则（例如 AI 扩展域名）直接内联在配置里；Sub-Store 节点清洗脚本用 commit-pinned URL 下载后以内联 Script Operator 形式保存到 Sub-Store。
+同理，`shadowrocket.conf` 内部不要再引用本仓库的 `@main` 资源。少量自有规则（例如 AI 扩展域名）直接内联在配置里；第三方规则通过 SJC `/rules/*` 镜像定时刷新；Sub-Store 节点清洗脚本用 commit-pinned URL 下载后以内联 Script Operator 形式保存到 Sub-Store。
 
 ## 已退役内容
 

@@ -23,6 +23,72 @@ const AI = {
   targetGroup: "AI服务",
 };
 
+const RULE_MIRROR_BASE_URL = "https://link.konbakuyomu.us/rules";
+
+function ruleMirrorUrl(fileName) {
+  return `${RULE_MIRROR_BASE_URL}/${fileName}`;
+}
+
+const KNOWN_RULE_PROVIDER_MIRRORS = [
+  {
+    source: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/gfw.txt",
+    mirrorFile: "mihomo-gfwlist-loyalsoldier.txt",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblockmihomolite.yaml",
+    mirrorFile: "mihomo-adblock-217heidai.yaml",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/AdditionalCDNResources.list",
+    mirrorFile: "mihomo-powerfullz-additional-cdn-resources.list",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/AdditionalFilter.list",
+    mirrorFile: "mihomo-powerfullz-additional-filter.list",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/Crypto.list",
+    mirrorFile: "mihomo-powerfullz-crypto.list",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/EHentai.list",
+    mirrorFile: "mihomo-powerfullz-ehentai.list",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/FirebaseCloudMessaging.list",
+    mirrorFile: "mihomo-powerfullz-googlefcm.list",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/SteamFix.list",
+    mirrorFile: "mihomo-powerfullz-steamfix.list",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/TikTok.list",
+    mirrorFile: "mihomo-powerfullz-tiktok.list",
+  },
+  {
+    source: "https://cdn.jsdelivr.net/gh/powerfullz/override-rules@master/ruleset/Weibo.list",
+    mirrorFile: "mihomo-powerfullz-weibo.list",
+  },
+];
+
+function rewriteKnownRuleProviderMirrors(config) {
+  const providers = config && config["rule-providers"];
+  if (!providers || typeof providers !== "object") return 0;
+
+  let rewritten = 0;
+  for (const provider of Object.values(providers)) {
+    if (!provider || typeof provider !== "object") continue;
+    const url = String(provider.url || "");
+    if (!url) continue;
+    const known = KNOWN_RULE_PROVIDER_MIRRORS.find(item => url === item.source);
+    if (!known) continue;
+    provider.url = ruleMirrorUrl(known.mirrorFile);
+    rewritten += 1;
+  }
+  return rewritten;
+}
+
 const UPSTREAM_MIHOMO_MAIN = (() => {
   if (typeof globalThis === "undefined" || typeof globalThis.main !== "function") return null;
   if (globalThis.__frontierSkeletonMain && globalThis.main === globalThis.__frontierSkeletonMain) return null;
@@ -336,25 +402,25 @@ function main(config) {
       const aiProviders = {
         "ai-dustin": {
           type: "http", behavior: "domain", format: "mrs",
-          url: "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.mrs",
+          url: ruleMirrorUrl("mihomo-ai-dustin.mrs"),
           path: "./ruleset/ai-dustin.mrs", interval: 86400,
           proxy: selectGroup
         },
         "ai-openai": {
           type: "http", behavior: "classical", format: "text",
-          url: "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.list",
+          url: ruleMirrorUrl("mihomo-ai-openai.list"),
           path: "./ruleset/ai-openai.list", interval: 86400,
           proxy: selectGroup
         },
         "ai-claude": {
           type: "http", behavior: "classical", format: "text",
-          url: "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.list",
+          url: ruleMirrorUrl("mihomo-ai-claude.list"),
           path: "./ruleset/ai-claude.list", interval: 86400,
           proxy: selectGroup
         },
         "ai-gemini": {
           type: "http", behavior: "classical", format: "text",
-          url: "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Gemini/Gemini.list",
+          url: ruleMirrorUrl("mihomo-ai-gemini.list"),
           path: "./ruleset/ai-gemini.list", interval: 86400,
           proxy: selectGroup
         },
@@ -762,13 +828,13 @@ function main(config) {
     const userProviders = {
       "paypal-meta": {
         type: "http", behavior: "domain", format: "mrs",
-        url: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/paypal.mrs",
+        url: ruleMirrorUrl("mihomo-paypal-meta.mrs"),
         path: "./ruleset/paypal-meta.mrs", interval: 86400,
         proxy: selectGroup,
       },
       "paypal-cn-meta": {
         type: "http", behavior: "domain", format: "mrs",
-        url: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/paypal%40cn.mrs",
+        url: ruleMirrorUrl("mihomo-paypal-cn-meta.mrs"),
         path: "./ruleset/paypal-cn-meta.mrs", interval: 86400,
         proxy: selectGroup,
       },
@@ -855,6 +921,10 @@ function main(config) {
   // ===== Shadowrocket 兼容（最后一步）=====
   // 把所有 include-all 组就地展开为节点名字数组，删除 mihomo 私有字段
   // ================================================
+  const rewrittenProviderCount = rewriteKnownRuleProviderMirrors(config);
+  if (rewrittenProviderCount > 0) {
+    logInfo(`第三方 rule-provider URL 已切换到 SJC mirror：${rewrittenProviderCount} 条`);
+  }
   expandIncludeAllGroups(config);
 
   return config;
