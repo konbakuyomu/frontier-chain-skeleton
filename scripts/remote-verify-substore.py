@@ -108,6 +108,15 @@ THIRD_PARTY_RULE_PROVIDER_HOSTS = (
     "github.com",
     "raw.githubusercontent.com",
 )
+REQUIRED_SSH_PORT_RULES = ("22", "14514")
+REQUIRED_SSH_PROCESS_NAMES = (
+    "ssh.exe",
+    "sftp.exe",
+    "scp.exe",
+    "Termius.exe",
+    "FinalShell.exe",
+)
+REQUIRED_FIND_PROCESS_MODE = "always"
 DEFAULT_TIMEOUT_RESIDENTIAL_NAMES = [
     "cf加速|越南动态家宽🇻🇳",
     "越南-cf加速 动态 🇻🇳-家宽",
@@ -560,6 +569,9 @@ def docker_log_issue_count(container, data):
 
 def analyze_mihomo_output(text):
     visible_text = normalize_visible_text(text)
+    data = yaml_safe_load(text)
+    if not isinstance(data, dict):
+        data = {}
     proxies = section(text, "proxies")
     proxy_groups = section(text, "proxy-groups")
     visible_proxy_groups = section(visible_text, "proxy-groups")
@@ -584,6 +596,7 @@ def analyze_mihomo_output(text):
         "has_rules": bool(rules),
         "has_rule_providers": bool(section(text, "rule-providers")),
         "has_dns": bool(section(text, "dns")),
+        "find_process_mode": str(data.get("find-process-mode") or ""),
         "proxy_group_count": count_regex(proxy_groups, r"^\s*-\s*name\s*:"),
         "rule_count": count_regex(rules, r"^\s*-\s*"),
         "evoxt_node_count": len(evoxt_items),
@@ -638,6 +651,7 @@ def analyze_mihomo_output(text):
         "paypal_group_region_residential_refs": group_body_regex_count(visible_proxy_groups, "PayPal", r"🏡 .+?家宽"),
         "forbidden_counts": forbidden_counts(visible_text),
         "rule_provider_urls": analyze_rule_provider_urls(text),
+        "ssh_routing": analyze_ssh_routing(rule_items, visible_proxy_groups),
     })
     return quality
 
@@ -731,6 +745,55 @@ def rule_before_match(rule_items, rule):
         return False
     match_idx = next((i for i, item in enumerate(rule_items) if item.startswith("MATCH,")), -1)
     return match_idx < 0 or rule_idx < match_idx
+
+
+def analyze_ssh_routing(rule_items, proxy_groups_text):
+    ssh_rules = [item for item in rule_items if item.endswith(",SSH")]
+    first_non_ssh_idx = next((i for i, item in enumerate(rule_items) if not item.endswith(",SSH")), -1)
+    match_idx = next((i for i, item in enumerate(rule_items) if item.startswith("MATCH,")), -1)
+    ssh_after_match = []
+    if match_idx >= 0:
+        ssh_after_match = [
+            item for i, item in enumerate(rule_items)
+            if i > match_idx and item.endswith(",SSH")
+        ]
+    ssh_after_non_ssh = []
+    if first_non_ssh_idx >= 0:
+        ssh_after_non_ssh = [
+            item for i, item in enumerate(rule_items)
+            if i > first_non_ssh_idx and item.endswith(",SSH")
+        ]
+    port_rules = {
+        match.group(1)
+        for item in ssh_rules
+        for match in [re.match(r"^DST-PORT,([^,]+),SSH$", item)]
+        if match
+    }
+    process_names = {
+        match.group(1)
+        for item in ssh_rules
+        for match in [re.match(r"^PROCESS-NAME,([^,]+),SSH$", item)]
+        if match
+    }
+    process_path_wildcards = [
+        match.group(1)
+        for item in ssh_rules
+        for match in [re.match(r"^PROCESS-PATH-WILDCARD,([^,]+),SSH$", item)]
+        if match
+    ]
+    return {
+        "has_group": bool(group_body(proxy_groups_text, "SSH")),
+        "rule_count": len(ssh_rules),
+        "port_rules": sorted(port_rules),
+        "process_names": sorted(process_names),
+        "process_path_wildcard_count": len(process_path_wildcards),
+        "missing_ports": [port for port in REQUIRED_SSH_PORT_RULES if port not in port_rules],
+        "missing_process_names": [name for name in REQUIRED_SSH_PROCESS_NAMES if name not in process_names],
+        "ssh_after_match": ssh_after_match,
+        "all_before_match": not ssh_after_match,
+        "ssh_after_non_ssh": ssh_after_non_ssh,
+        "all_at_rule_front": bool(ssh_rules) and not ssh_after_non_ssh,
+    }
 
 
 def group_body(proxy_groups_text, group_name):
@@ -1258,6 +1321,28 @@ def main():
                 checks.append(ok("final mihomo has rules", http["final_mihomo"]["rule_count"] > 1, str(http["final_mihomo"]["rule_count"])))
                 checks.append(ok("final mihomo has DNS", http["final_mihomo"]["has_dns"]))
                 checks.append(ok("final mihomo has rule-providers", http["final_mihomo"]["has_rule_providers"]))
+                ssh_routing = http["final_mihomo"]["ssh_routing"]
+                checks.append(ok("final mihomo has SSH group", ssh_routing["has_group"]))
+                checks.append(ok("final mihomo find-process-mode enables process rules", http["final_mihomo"]["find_process_mode"] == REQUIRED_FIND_PROCESS_MODE, safe_detail_dict({
+                    "find_process_mode": http["final_mihomo"]["find_process_mode"],
+                    "required": REQUIRED_FIND_PROCESS_MODE,
+                })))
+                checks.append(ok("final mihomo has required SSH port rules", not ssh_routing["missing_ports"], safe_detail_dict({
+                    "ports": ssh_routing["port_rules"],
+                    "missing": ssh_routing["missing_ports"],
+                })))
+                checks.append(ok("final mihomo has required SSH process rules", not ssh_routing["missing_process_names"], safe_detail_dict({
+                    "process_names": ssh_routing["process_names"],
+                    "missing": ssh_routing["missing_process_names"],
+                })))
+                checks.append(ok("final mihomo SSH rules appear before MATCH fallback", ssh_routing["all_before_match"], safe_detail_dict({
+                    "rule_count": ssh_routing["rule_count"],
+                    "after_match_count": len(ssh_routing["ssh_after_match"]),
+                })))
+                checks.append(ok("final mihomo SSH rules are at rule front", ssh_routing["all_at_rule_front"], safe_detail_dict({
+                    "rule_count": ssh_routing["rule_count"],
+                    "after_non_ssh_count": len(ssh_routing["ssh_after_non_ssh"]),
+                })))
                 checks.append(ok("final mihomo rule-provider URLs use SJC mirror", http["final_mihomo"]["rule_provider_urls"]["third_party_count"] == 0, safe_detail_dict({
                     "provider_count": http["final_mihomo"]["rule_provider_urls"]["provider_count"],
                     "provider_url_count": http["final_mihomo"]["rule_provider_urls"]["provider_url_count"],

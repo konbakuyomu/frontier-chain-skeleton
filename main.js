@@ -23,6 +23,32 @@ const AI = {
   targetGroup: "AI服务",
 };
 
+const SSH_ROUTING = {
+  targetGroup: "SSH",
+  findProcessMode: "always",
+  ports: [
+    22,
+    14514,
+  ],
+  processNames: [
+    "ssh.exe",
+    "sftp.exe",
+    "scp.exe",
+    "Termius.exe",
+    "FinalShell.exe",
+    "putty.exe",
+    "plink.exe",
+    "psftp.exe",
+    "WinSCP.exe",
+    "MobaXterm.exe",
+    "Xshell.exe",
+  ],
+  // Do not add a broad java.exe process rule. For Java-wrapped clients such as
+  // FinalShell, add a precise install-path wildcard after checking the
+  // process path in the Mihomo/Sparkle connection details.
+  processPathWildcards: [],
+};
+
 const RULE_MIRROR_BASE_URL = "https://link.konbakuyomu.us/rules";
 
 function ruleMirrorUrl(fileName) {
@@ -119,6 +145,18 @@ function logWarn(message) {
   }
 }
 
+function uniqueList(items) {
+  const out = [];
+  const seen = new Set();
+  for (const item of items || []) {
+    const value = String(item == null ? "" : item).trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
 function compileFilter(mihomoFilter) {
   if (mihomoFilter.startsWith("(?i)")) {
     return new RegExp(mihomoFilter.slice(4), "i");
@@ -192,6 +230,33 @@ function findAIGroup(config, fallbackGroup, explicitTarget) {
   });
 }
 
+function findSSHGroup(config, fallbackGroup) {
+  return resolveGroup(config, {
+    label: "SSH",
+    explicit: SSH_ROUTING.targetGroup,
+    preferred: ["SSH", "SSH(22端口)", "SSH 分流"],
+    fuzzy: /^SSH(?:\b|[（(]|$)/i,
+    fallback: [fallbackGroup],
+  });
+}
+
+function buildSSHRules(sshGroup) {
+  const portRules = uniqueList(SSH_ROUTING.ports)
+    .filter(port => /^\d+$/.test(port))
+    .map(port => `DST-PORT,${port},${sshGroup}`);
+  const processNameRules = uniqueList(SSH_ROUTING.processNames)
+    .map(name => `PROCESS-NAME,${name},${sshGroup}`);
+  const processPathRules = uniqueList(SSH_ROUTING.processPathWildcards)
+    .map(path => `PROCESS-PATH-WILDCARD,${path},${sshGroup}`);
+  return [...portRules, ...processNameRules, ...processPathRules];
+}
+
+function ensureFindProcessMode(config) {
+  if (!SSH_ROUTING.findProcessMode) return "";
+  config["find-process-mode"] = SSH_ROUTING.findProcessMode;
+  return config["find-process-mode"];
+}
+
 function getRuleTarget(rule) {
   const parts = String(rule).split(",").map(part => part.trim()).filter(Boolean);
   if (parts.length < 2) return null;
@@ -226,6 +291,19 @@ function prependUniqueRules(config, rules) {
   }
   config.rules = [...uniqueRules, ...config.rules];
   return uniqueRules;
+}
+
+function ensureRulesAtFront(config, rules) {
+  if (!Array.isArray(config.rules)) config.rules = [];
+  const frontRules = uniqueList(rules);
+  if (frontRules.length === 0) return frontRules;
+
+  const frontRuleSet = new Set(frontRules);
+  config.rules = [
+    ...frontRules,
+    ...config.rules.filter(rule => !frontRuleSet.has(String(rule).trim())),
+  ];
+  return frontRules;
 }
 
 function insertUniqueRulesBefore(config, rules, isAnchor) {
@@ -365,6 +443,13 @@ function main(config) {
 
   const selectGroup = findSelectGroup(config);
   const googleGroup = findGoogleGroup(config, selectGroup);
+  const sshGroup = findSSHGroup(config, selectGroup);
+  const findProcessMode = ensureFindProcessMode(config);
+
+  const sshRules = buildSSHRules(sshGroup);
+  validateRuleTargets(config, sshRules);
+  const insertedSSHRules = prependUniqueRules(config, sshRules);
+  logInfo(`SSH 分流规则注入：${insertedSSHRules.length} 条新增，目标组 ${sshGroup}，find-process-mode=${findProcessMode || "unchanged"}`);
 
   const testSiteRules = [
     `DOMAIN-SUFFIX,browserleaks.com,${selectGroup}`,
@@ -926,6 +1011,8 @@ function main(config) {
     logInfo(`第三方 rule-provider URL 已切换到 SJC mirror：${rewrittenProviderCount} 条`);
   }
   expandIncludeAllGroups(config);
+  const frontSSHRules = ensureRulesAtFront(config, sshRules);
+  logInfo(`SSH 分流规则最终置顶：${frontSSHRules.length} 条位于规则表最前部`);
 
   return config;
 }

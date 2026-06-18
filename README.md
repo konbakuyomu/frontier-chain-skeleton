@@ -187,6 +187,18 @@ https://<SUBSCRIPTION_HUB_PUBLIC_HOST>/<OPAQUE_SHADOWROCKET_CONFIG_PATH>
 
 同理，`shadowrocket.conf` 内部不要再引用本仓库的 `@main` 资源。少量自有规则（例如 AI 扩展域名）直接内联在配置里；第三方规则通过 SJC `/rules/*` 镜像定时刷新；Sub-Store 节点清洗脚本用 commit-pinned URL 下载后以内联 Script Operator 形式保存到 Sub-Store。
 
+## SSH 分流维护
+
+Mihomo 不能靠 sniffer 识别任意端口上的 SSH 协议；SSH 分流由 `main.js` 顶部的 `SSH_ROUTING` 集中登记表生成，并统一开启 `find-process-mode: always` 让 `PROCESS-NAME` / `PROCESS-PATH-WILDCARD` 生效。新增 SSH 客户端或非标准 SSH 端口时，只改这个登记表，不要在 `rules` 里散落手写规则。
+
+- 新 SSH 服务器使用非标准端口：把端口加到 `SSH_ROUTING.ports`。
+- 新客户端在 Sparkle/Mihomo 连接详情里显示为明确 SSH 客户端进程：把进程名加到 `SSH_ROUTING.processNames`。
+- FinalShell 等 Java 包装客户端如果显示为 `java.exe`：先复制连接详情里的进程路径，再把安装目录精确加到 `SSH_ROUTING.processPathWildcards`；不要添加裸 `java.exe`。
+- VS Code Remote SSH 通常复用 Windows OpenSSH 的 `ssh.exe`，一般不需要额外添加 `Code.exe`。
+- 不要用目标 IP 全匹配来判定 SSH；同一 VPS IP 可能同时承载代理节点、HTTPS 或其他业务端口。
+
+每次修改后运行 verifier，确认 final Mihomo 中 `SSH` 组存在，`find-process-mode` 为 `always`，必需端口/进程规则存在，且所有 SSH 规则都在规则表前部和 `MATCH` 前。
+
 ## 已退役内容
 
 - 不再生成 `🏠 [VPS->家宽] Frontier`。
