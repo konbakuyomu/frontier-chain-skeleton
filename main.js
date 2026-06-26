@@ -50,9 +50,77 @@ const SSH_ROUTING = {
 };
 
 const RULE_MIRROR_BASE_URL = "https://link.konbakuyomu.us/rules";
+const SELF_DOMAIN_GROUP_NAME = "自有域名";
+const SELF_DOMAIN_SUFFIXES = ["konbakuyomu.us"];
+const SELF_DOMAIN_DOH_NAMESERVERS = [
+  "https://cloudflare-dns.com/dns-query",
+  "https://dns.google/dns-query",
+];
+const DNS_BASE_REAL_IP_RULES = [
+  "DOMAIN-SUFFIX,lan,real-ip",
+  "DOMAIN-SUFFIX,local,real-ip",
+  "DOMAIN-SUFFIX,internal,real-ip",
+  "DOMAIN-SUFFIX,home.arpa,real-ip",
+  "DOMAIN-SUFFIX,in-addr.arpa,real-ip",
+  "DOMAIN-SUFFIX,ip6.arpa,real-ip",
+  "DOMAIN-SUFFIX,msftconnecttest.com,real-ip",
+  "DOMAIN-SUFFIX,msftncsi.com,real-ip",
+  "DOMAIN-KEYWORD,stun,real-ip",
+  "DOMAIN-SUFFIX,push.apple.com,real-ip",
+  "DOMAIN-SUFFIX,apple.com,real-ip",
+  "DOMAIN-SUFFIX,icloud.com,real-ip",
+  "DOMAIN,localhost.ptlogin2.qq.com,real-ip",
+  "DOMAIN-SUFFIX,market.xiaomi.com,real-ip",
+  "DOMAIN-KEYWORD,_tcp,real-ip",
+  "DOMAIN-KEYWORD,_udp,real-ip",
+];
 
 function ruleMirrorUrl(fileName) {
   return `${RULE_MIRROR_BASE_URL}/${fileName}`;
+}
+
+function buildSelfDomainNameserverPolicy() {
+  const policy = {};
+  for (const suffix of SELF_DOMAIN_SUFFIXES) {
+    policy[suffix] = [...SELF_DOMAIN_DOH_NAMESERVERS];
+    policy[`+.${suffix}`] = [...SELF_DOMAIN_DOH_NAMESERVERS];
+  }
+  return policy;
+}
+
+function routeRuleToFakeIpFilterRule(rule) {
+  if (typeof rule !== "string") return null;
+  const parts = rule.split(",").map(part => part.trim());
+  if (parts.length < 3) return null;
+
+  const type = parts[0];
+  const domainRuleTypes = new Set([
+    "DOMAIN",
+    "DOMAIN-SUFFIX",
+    "DOMAIN-KEYWORD",
+    "GEOSITE",
+    "RULE-SET",
+  ]);
+  if (!domainRuleTypes.has(type)) return null;
+
+  const target = parts[2];
+  const dnsTarget = (target === "DIRECT" || target === SELF_DOMAIN_GROUP_NAME) ? "real-ip" : "fake-ip";
+  return `${type},${parts[1]},${dnsTarget}`;
+}
+
+function buildFakeIpFilterRules(config) {
+  const rules = [
+    ...DNS_BASE_REAL_IP_RULES,
+    ...SELF_DOMAIN_SUFFIXES.map(suffix => `DOMAIN-SUFFIX,${suffix},real-ip`),
+  ];
+  if (Array.isArray(config.rules)) {
+    for (const rule of config.rules) {
+      const dnsRule = routeRuleToFakeIpFilterRule(rule);
+      if (dnsRule) rules.push(dnsRule);
+    }
+  }
+  rules.push("MATCH,fake-ip");
+  return [...new Set(rules)];
 }
 
 const KNOWN_RULE_PROVIDER_MIRRORS = [
@@ -399,29 +467,8 @@ function main(config) {
     ipv6: true,
     "enhanced-mode": "fake-ip",
     "fake-ip-range": "198.18.0.1/16",
-    "fake-ip-filter-mode": "blacklist",
-    "fake-ip-filter": [
-      "+.lan",
-      "+.local",
-      "+.internal",
-      "+.home.arpa",
-      "*.in-addr.arpa",
-      "*.ip6.arpa",
-      "+.msftconnecttest.com",
-      "+.msftncsi.com",
-      "*.stun.*.*",
-      "*.stun.*.*.*",
-      "+.stun.*",
-      "+.push.apple.com",
-      "+.apple.com",
-      "+.icloud.com",
-      "localhost.ptlogin2.qq.com",
-      "+.market.xiaomi.com",
-      "*.lan",
-      "*.local",
-      "*._tcp.*",
-      "*._udp.*"
-    ],
+    "fake-ip-filter-mode": "rule",
+    "fake-ip-filter": buildFakeIpFilterRules(config),
     "default-nameserver": [
       "tls://223.5.5.5",
       "tls://223.6.6.6"
@@ -438,6 +485,8 @@ function main(config) {
       "https://dns.alidns.com/dns-query",
       "https://doh.pub/dns-query"
     ],
+    "nameserver-policy": buildSelfDomainNameserverPolicy(),
+    "direct-nameserver-follow-policy": true,
     "respect-rules": true
   };
 
@@ -630,8 +679,7 @@ function main(config) {
     // 注：组挂了大图标（icon 字段），组名故意不带 emoji 前缀
     // 详见 .trellis/spec/network/proxy-group-flexibility.md §5 图标 + 命名规则
     const paypalGroupName = "PayPal";
-    const selfDomainGroupName = "自有域名";
-    const SELF_DOMAIN_SUFFIXES = ["konbakuyomu.us"];
+    const selfDomainGroupName = SELF_DOMAIN_GROUP_NAME;
     const RESIDENTIAL_SELECTOR_NAME = "🏡 家宽选择";
 
     // Koolson/Qure 图标库 base（与 powerfullz 国家组同款，Sparkle UI 显示协调）
@@ -1013,6 +1061,10 @@ function main(config) {
   expandIncludeAllGroups(config);
   const frontSSHRules = ensureRulesAtFront(config, sshRules);
   logInfo(`SSH 分流规则最终置顶：${frontSSHRules.length} 条位于规则表最前部`);
+  if (config.dns && config.dns["fake-ip-filter-mode"] === "rule") {
+    config.dns["fake-ip-filter"] = buildFakeIpFilterRules(config);
+    logInfo(`DIRECT/自有域名 real-ip DNS 规则生成完成：${config.dns["fake-ip-filter"].length} 条`);
+  }
 
   return config;
 }
