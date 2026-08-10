@@ -1,0 +1,21 @@
+[Unit]
+Description=Renew the ATT proxy-share Certbot certificate
+Wants=network-online.target
+After=network-online.target docker.service
+ConditionPathExists=/opt/codex-stacks/att-proxy-share/manage.py
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/opt/codex-stacks/att-proxy-share
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /opt/codex-stacks/att-proxy-share/manage.py renew-tls
+TimeoutStartSec=15min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/codex-stacks/att-proxy-share/.runtime
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

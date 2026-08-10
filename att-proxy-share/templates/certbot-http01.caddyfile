@@ -1,0 +1,12 @@
+# Insert this handler into the existing HTTP (port 80) site for edge-us.konbakuyomu.us.
+# It must appear before any HTTP-to-HTTPS redirect or catch-all handler. `handle` preserves
+# the challenge path Certbot expects, and the target resolves only while its one-shot
+# att-certbot-acme container is attached to edge_ingress.
+@att_proxy_share_certbot_http01 {
+    host edge-us.konbakuyomu.us
+    path /.well-known/acme-challenge/*
+}
+
+handle @att_proxy_share_certbot_http01 {
+    reverse_proxy att-certbot-acme:18081
+}

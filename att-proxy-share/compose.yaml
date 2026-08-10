@@ -1,0 +1,46 @@
+services:
+  att-proxy-share:
+    image: metacubex/mihomo:v1.19.29
+    container_name: att-proxy-share
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    volumes:
+      - ./.runtime/config.json:/root/.config/mihomo/config.yaml:ro
+      # Mount the whole Certbot config so live/ symlinks can resolve into archive/.
+      - ./.runtime/certbot/config:/root/.config/mihomo/certs:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  certbot:
+    image: certbot/certbot:v5.7.0@sha256:d07bd043d61d6bee1114235ac12c2e9a5c54b6931b3ccf5e1174d6c8c4afaa95
+    profiles: ["certbot"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    volumes:
+      - ./.runtime/certbot/config:/etc/letsencrypt:rw
+      - ./.runtime/certbot/work:/var/lib/letsencrypt:rw
+      - ./.runtime/certbot/logs:/var/log/letsencrypt:rw
+    networks:
+      - edge_ingress
+
+networks:
+  edge_ingress:
+    external: true

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Certbot renewal check for the ATT proxy-share gateway
+
+[Timer]
+OnCalendar=*-*-* 04:19:00
+RandomizedDelaySec=1h
+Persistent=true
+Unit=att-proxy-share-certbot-renew.service
+
+[Install]
+WantedBy=timers.target
