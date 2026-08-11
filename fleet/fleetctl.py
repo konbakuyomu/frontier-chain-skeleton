@@ -9,6 +9,13 @@ from pathlib import Path
 from typing import Sequence
 
 if __package__:
+    from .publication_adapter import (
+        PublicationContractLoadError,
+        PublicationContractValidationError,
+        load_publication_contract,
+        render_publication_diff_json,
+        render_publication_plan_json,
+    )
     from .registry import (
         RegistryLoadError,
         RegistryValidationError,
@@ -19,6 +26,13 @@ if __package__:
         validate_registry,
     )
 else:
+    from publication_adapter import (
+        PublicationContractLoadError,
+        PublicationContractValidationError,
+        load_publication_contract,
+        render_publication_diff_json,
+        render_publication_plan_json,
+    )
     from registry import (
         RegistryLoadError,
         RegistryValidationError,
@@ -35,11 +49,20 @@ def build_parser() -> argparse.ArgumentParser:
         description="Validate, plan, or inspect a public-safe fleet registry."
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    for command_name in ("validate", "plan", "status", "inventory-plan"):
+    for command_name in (
+        "validate",
+        "plan",
+        "status",
+        "inventory-plan",
+        "publication-plan",
+        "publication-diff",
+    ):
         command = commands.add_parser(command_name)
         command.add_argument("--registry", required=True, type=Path)
         if command_name in {"status", "inventory-plan"}:
             command.add_argument("--host", action="append", required=True)
+        if command_name == "publication-diff":
+            command.add_argument("--contract", required=True, type=Path)
     return parser
 
 
@@ -66,11 +89,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "inventory-plan":
             print(render_inventory_plan_json(registry, args.host), end="")
             return 0
+        if args.command == "publication-plan":
+            print(render_publication_plan_json(registry), end="")
+            return 0
+        if args.command == "publication-diff":
+            contract = load_publication_contract(args.contract)
+            print(render_publication_diff_json(registry, contract), end="")
+            return 0
         raise AssertionError("unexpected command")
     except RegistryLoadError:
         sys.stderr.write("invalid registry: local JSON input could not be read\n")
     except RegistryValidationError as error:
         sys.stderr.write(f"invalid registry: validation failed ({len(error.errors)} issue(s))\n")
+    except PublicationContractLoadError:
+        sys.stderr.write("invalid publication contract: local JSON input could not be read\n")
+    except PublicationContractValidationError as error:
+        sys.stderr.write(
+            f"invalid publication contract: validation failed ({len(error.errors)} issue(s))\n"
+        )
     return 2
 
 

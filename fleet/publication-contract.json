@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "channel_contracts": [
+    {
+      "channel": "final-mihomo",
+      "output_shape": "mihomo-profile",
+      "semantic_profile": "shared-mihomo"
+    },
+    {
+      "channel": "shadowrocket-hy2-only",
+      "output_shape": "hy2-yaml",
+      "semantic_profile": "hy2"
+    },
+    {
+      "channel": "shadowrocket-ordinary-uri",
+      "output_shape": "uri-feed",
+      "semantic_profile": "ordinary"
+    }
+  ],
+  "route_bindings": [
+    {
+      "role_id": "route-bare-data-hy2",
+      "binding_state": "unbound"
+    },
+    {
+      "role_id": "route-bare-data-reality",
+      "binding_state": "unbound"
+    },
+    {
+      "role_id": "route-edge-vmess",
+      "binding_state": "unbound"
+    },
+    {
+      "role_id": "route-public-gateway-http-socks",
+      "binding_state": "unbound"
+    }
+  ]
+}
