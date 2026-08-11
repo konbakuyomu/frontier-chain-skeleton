@@ -216,6 +216,108 @@ class RegistryTests(unittest.TestCase):
         self.assertIn("stale-snapshot", evidence_statuses)
         self.assertEqual(first["summary"]["eligible_publication_count"], 0)
 
+    def test_status_selects_one_host_and_preserves_stale_publication_blockers(self) -> None:
+        data = self.valid_registry()
+        before = json.dumps(data, sort_keys=True)
+
+        status = registry.status_registry(data, ["host-bare-data-01"])
+
+        self.assertEqual(status["evidence_plane"], "local")
+        self.assertEqual(status["host"]["host_id"], "host-bare-data-01")
+        self.assertNotIn("host-edge-01", json.dumps(status, sort_keys=True))
+        self.assertEqual(status["summary"], {
+            "eligible_publication_count": 0,
+            "endpoint_count": 2,
+            "ineligible_publication_count": 4,
+            "publication_count": 4,
+            "stale_evidence_count": 2,
+        })
+        self.assertTrue(
+            all(
+                endpoint["evidence_status"] == "stale-snapshot"
+                for endpoint in status["host"]["endpoints"]
+            )
+        )
+        publication_rows = [
+            publication
+            for endpoint in status["host"]["endpoints"]
+            for route in endpoint["routes"]
+            for publication in route["publication_eligibility"]
+        ]
+        self.assertTrue(publication_rows)
+        self.assertTrue(all(not publication["eligible"] for publication in publication_rows))
+        self.assertEqual(before, json.dumps(data, sort_keys=True))
+
+    def test_status_rejects_invalid_or_nonunique_host_selection_without_echoing_it(self) -> None:
+        data = self.valid_registry()
+        rejected_selections = (
+            [],
+            ["Host-bare-data-01"],
+            ["host-missing-01"],
+            ["host-bare-data-01", "host-bare-data-01"],
+        )
+
+        for host_ids in rejected_selections:
+            with self.subTest(host_ids=host_ids):
+                with self.assertRaises(registry.RegistryValidationError) as captured:
+                    registry.status_registry(data, host_ids)
+                self.assertNotIn("Host-bare-data-01", str(captured.exception))
+                self.assertNotIn("host-missing-01", str(captured.exception))
+
+    def test_inventory_plan_is_local_only_and_lists_the_remote_adapter_gate(self) -> None:
+        data = self.valid_registry()
+
+        plan = registry.inventory_plan_registry(data, ["host-bare-data-01"])
+
+        self.assertEqual(plan["status"]["evidence_plane"], "local")
+        self.assertEqual(plan["inventory_request"], {
+            "host_id": "host-bare-data-01",
+            "mode": "local-plan-only",
+            "private_mapping_resolution": "not-performed",
+            "promotion_allowed": False,
+            "remote_contact_performed": False,
+            "required_next_gate": "approved-explicit-host-remote-adapter",
+            "required_proof_categories": [
+                "explicit-host-selection",
+                "private-adapter-outside-public-fleet-package",
+                "DIRECT-key-only-tmux-provider-recovery",
+                "redacted-host-readback",
+            ],
+        })
+
+    def test_inventory_plan_fails_closed_for_a_retired_host(self) -> None:
+        data = self.valid_registry()
+
+        plan = registry.inventory_plan_registry(data, ["host-legacy-01"])
+
+        self.assertEqual(plan["status"]["host"]["lifecycle"], "retired")
+        self.assertEqual(
+            plan["status"]["host"]["endpoints"][0]["evidence_status"],
+            "stale-historical",
+        )
+        self.assertEqual(plan["inventory_request"], {
+            "blocker": "host-lifecycle-retired",
+            "host_id": "host-legacy-01",
+            "inventory_allowed": False,
+            "mode": "local-plan-only",
+            "private_mapping_resolution": "not-performed",
+            "promotion_allowed": False,
+            "remote_contact_performed": False,
+            "required_next_gate": "retired-host-remains-blocked",
+        })
+
+    def test_host_scoped_json_is_deterministic(self) -> None:
+        data = self.valid_registry()
+
+        first_status = registry.render_status_json(data, ["host-bare-data-01"])
+        second_status = registry.render_status_json(data, ["host-bare-data-01"])
+        first_inventory_plan = registry.render_inventory_plan_json(data, ["host-bare-data-01"])
+        second_inventory_plan = registry.render_inventory_plan_json(data, ["host-bare-data-01"])
+
+        self.assertEqual(first_status, second_status)
+        self.assertEqual(first_inventory_plan, second_inventory_plan)
+        self.assertEqual(json.loads(first_inventory_plan)["status"], json.loads(first_status))
+
     def test_cli_is_local_only_and_does_not_create_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             registry_path = Path(temp_dir) / "registry.json"
@@ -266,10 +368,133 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(first_plan.returncode, 0, first_plan.stderr)
             self.assertEqual(first_plan.stdout, second_plan.stdout)
             self.assertEqual(json.loads(first_plan.stdout)["summary"]["host_count"], 6)
+
+            status_command = command[:2] + ["status"] + command[3:] + [
+                "--host",
+                "host-bare-data-01",
+            ]
+            first_status = subprocess.run(
+                status_command,
+                cwd=SOURCE_ROOT,
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+            )
+            second_status = subprocess.run(
+                status_command,
+                cwd=SOURCE_ROOT,
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+            )
+            self.assertEqual(first_status.returncode, 0, first_status.stderr)
+            self.assertEqual(first_status.stdout, second_status.stdout)
+            self.assertEqual(json.loads(first_status.stdout)["evidence_plane"], "local")
+
+            inventory_plan_command = command[:2] + ["inventory-plan"] + command[3:] + [
+                "--host",
+                "host-bare-data-01",
+            ]
+            first_inventory_plan = subprocess.run(
+                inventory_plan_command,
+                cwd=SOURCE_ROOT,
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+            )
+            second_inventory_plan = subprocess.run(
+                inventory_plan_command,
+                cwd=SOURCE_ROOT,
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+            )
+            self.assertEqual(first_inventory_plan.returncode, 0, first_inventory_plan.stderr)
+            self.assertEqual(first_inventory_plan.stdout, second_inventory_plan.stdout)
+            self.assertFalse(
+                json.loads(first_inventory_plan.stdout)["inventory_request"][
+                    "remote_contact_performed"
+                ]
+            )
             self.assertEqual(registry_path.read_bytes(), before_bytes)
             self.assertEqual(
                 sorted(item.name for item in Path(temp_dir).iterdir()), before_entries
             )
+
+    def test_cli_redacts_invalid_or_duplicate_host_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            registry_path = Path(temp_dir) / "registry.json"
+            registry_path.write_text(json.dumps(self.valid_registry()), encoding="utf-8")
+            unknown_host = "host-missing-01"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SOURCE_ROOT / "fleetctl.py"),
+                    "status",
+                    "--registry",
+                    str(registry_path),
+                    "--host",
+                    unknown_host,
+                ],
+                cwd=SOURCE_ROOT,
+                capture_output=True,
+                check=False,
+                env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(
+                result.stderr, "invalid registry: validation failed (1 issue(s))\n"
+            )
+            self.assertNotIn(unknown_host, result.stdout)
+            self.assertNotIn(unknown_host, result.stderr)
+
+            duplicate = subprocess.run(
+                [
+                    sys.executable,
+                    str(SOURCE_ROOT / "fleetctl.py"),
+                    "inventory-plan",
+                    "--registry",
+                    str(registry_path),
+                    "--host",
+                    "host-bare-data-01",
+                    "--host",
+                    "host-bare-data-01",
+                ],
+                cwd=SOURCE_ROOT,
+                capture_output=True,
+                check=False,
+                env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+                text=True,
+            )
+
+            self.assertEqual(duplicate.returncode, 2)
+            self.assertEqual(
+                duplicate.stderr, "invalid registry: validation failed (1 issue(s))\n"
+            )
+
+            missing = subprocess.run(
+                [
+                    sys.executable,
+                    str(SOURCE_ROOT / "fleetctl.py"),
+                    "status",
+                    "--registry",
+                    str(registry_path),
+                ],
+                cwd=SOURCE_ROOT,
+                capture_output=True,
+                check=False,
+                env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+                text=True,
+            )
+
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn("--host", missing.stderr)
 
     def test_cli_does_not_echo_rejected_sensitive_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -360,26 +585,39 @@ class RegistryTests(unittest.TestCase):
 
     def test_production_modules_do_not_import_transport_or_execution_modules(self) -> None:
         forbidden_modules = {
+            "aiohttp",
+            "asyncio",
             "asyncssh",
+            "dns",
             "fabric",
             "ftplib",
             "http",
+            "httpx",
+            "os",
             "paramiko",
             "requests",
             "socket",
             "subprocess",
             "telnetlib",
             "urllib",
+            "urllib3",
+            "websocket",
+            "websockets",
         }
-        for source_name in ("registry.py", "fleetctl.py"):
-            tree = ast.parse((SOURCE_ROOT / source_name).read_text(encoding="utf-8"))
+        source_paths = (
+            source_path
+            for source_path in SOURCE_ROOT.rglob("*.py")
+            if "tests" not in source_path.relative_to(SOURCE_ROOT).parts
+        )
+        for source_path in sorted(source_paths):
+            tree = ast.parse(source_path.read_text(encoding="utf-8"))
             imported_modules: set[str] = set()
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     imported_modules.update(alias.name.split(".")[0] for alias in node.names)
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     imported_modules.add(node.module.split(".")[0])
-            self.assertFalse(imported_modules & forbidden_modules, source_name)
+            self.assertFalse(imported_modules & forbidden_modules, source_path.name)
 
 
 if __name__ == "__main__":

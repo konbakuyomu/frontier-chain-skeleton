@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -412,6 +413,79 @@ def render_plan_json(registry: object) -> str:
     return json.dumps(plan_registry(registry), ensure_ascii=True, indent=2, sort_keys=True) + "\n"
 
 
+def status_registry(registry: object, host_ids: Sequence[str]) -> dict[str, Any]:
+    """Return the local plan row for exactly one explicit public host ID."""
+
+    plan = plan_registry(registry)
+    host_id = _select_host_id(host_ids)
+    for host in plan["hosts"]:
+        if host["host_id"] == host_id:
+            return {
+                "evidence_plane": "local",
+                "host": host,
+                "schema_version": SCHEMA_VERSION,
+                "summary": _host_status_summary(host),
+            }
+    raise RegistryValidationError(["selected host is not registered"])
+
+
+def render_status_json(registry: object, host_ids: Sequence[str]) -> str:
+    """Return byte-stable local status JSON for one selected host."""
+
+    return json.dumps(
+        status_registry(registry, host_ids), ensure_ascii=True, indent=2, sort_keys=True
+    ) + "\n"
+
+
+def inventory_plan_registry(registry: object, host_ids: Sequence[str]) -> dict[str, Any]:
+    """Describe the next remote inventory gate without resolving or contacting a host."""
+
+    status = status_registry(registry, host_ids)
+    host = status["host"]
+    request: dict[str, Any] = {
+        "host_id": host["host_id"],
+        "mode": "local-plan-only",
+        "private_mapping_resolution": "not-performed",
+        "remote_contact_performed": False,
+    }
+
+    if host["lifecycle"] == "retired":
+        request.update(
+            {
+                "blocker": "host-lifecycle-retired",
+                "inventory_allowed": False,
+                "promotion_allowed": False,
+                "required_next_gate": "retired-host-remains-blocked",
+            }
+        )
+    else:
+        request.update(
+            {
+                "promotion_allowed": False,
+                "required_next_gate": "approved-explicit-host-remote-adapter",
+                "required_proof_categories": [
+                    "explicit-host-selection",
+                    "private-adapter-outside-public-fleet-package",
+                    "DIRECT-key-only-tmux-provider-recovery",
+                    "redacted-host-readback",
+                ],
+            }
+        )
+
+    return {"inventory_request": request, "status": status}
+
+
+def render_inventory_plan_json(registry: object, host_ids: Sequence[str]) -> str:
+    """Return byte-stable local inventory-plan JSON for one selected host."""
+
+    return json.dumps(
+        inventory_plan_registry(registry, host_ids),
+        ensure_ascii=True,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+
+
 def _validate_top_level(registry: dict[str, Any], errors: list[str]) -> None:
     if set(registry) != TOP_LEVEL_FIELDS:
         errors.append("registry must contain only the documented top-level fields")
@@ -756,6 +830,39 @@ def _record_items(source: object) -> list[tuple[int, dict[str, Any]]]:
     if not isinstance(source, list):
         return []
     return [(index, item) for index, item in enumerate(source) if isinstance(item, dict)]
+
+
+def _select_host_id(host_ids: Sequence[str]) -> str:
+    if isinstance(host_ids, str) or not isinstance(host_ids, Sequence) or len(host_ids) != 1:
+        raise RegistryValidationError(["selected host must be exactly one normalized stable ID"])
+
+    host_id = host_ids[0]
+    if not isinstance(host_id, str) or STABLE_ID_RE.fullmatch(host_id) is None:
+        raise RegistryValidationError(["selected host must be exactly one normalized stable ID"])
+    return host_id
+
+
+def _host_status_summary(host: dict[str, Any]) -> dict[str, int]:
+    endpoints = host["endpoints"]
+    publication_rows = [
+        publication
+        for endpoint in endpoints
+        for route in endpoint["routes"]
+        for publication in route["publication_eligibility"]
+    ]
+    return {
+        "eligible_publication_count": sum(
+            publication["eligible"] for publication in publication_rows
+        ),
+        "endpoint_count": len(endpoints),
+        "ineligible_publication_count": sum(
+            not publication["eligible"] for publication in publication_rows
+        ),
+        "publication_count": len(publication_rows),
+        "stale_evidence_count": sum(
+            endpoint["evidence_status"].startswith("stale") for endpoint in endpoints
+        ),
+    }
 
 
 def _scan_sensitive_material(value: object, path: str, errors: list[str]) -> None:

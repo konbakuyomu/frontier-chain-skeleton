@@ -13,7 +13,9 @@ if __package__:
         RegistryLoadError,
         RegistryValidationError,
         load_registry,
+        render_inventory_plan_json,
         render_plan_json,
+        render_status_json,
         validate_registry,
     )
 else:
@@ -21,17 +23,23 @@ else:
         RegistryLoadError,
         RegistryValidationError,
         load_registry,
+        render_inventory_plan_json,
         render_plan_json,
+        render_status_json,
         validate_registry,
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Validate or plan a public-safe fleet registry.")
+    parser = argparse.ArgumentParser(
+        description="Validate, plan, or inspect a public-safe fleet registry."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
-    for command_name in ("validate", "plan"):
+    for command_name in ("validate", "plan", "status", "inventory-plan"):
         command = commands.add_parser(command_name)
         command.add_argument("--registry", required=True, type=Path)
+        if command_name in {"status", "inventory-plan"}:
+            command.add_argument("--host", action="append", required=True)
     return parser
 
 
@@ -49,8 +57,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0
-        print(render_plan_json(registry), end="")
-        return 0
+        if args.command == "plan":
+            print(render_plan_json(registry), end="")
+            return 0
+        if args.command == "status":
+            print(render_status_json(registry, args.host), end="")
+            return 0
+        if args.command == "inventory-plan":
+            print(render_inventory_plan_json(registry, args.host), end="")
+            return 0
+        raise AssertionError("unexpected command")
     except RegistryLoadError:
         sys.stderr.write("invalid registry: local JSON input could not be read\n")
     except RegistryValidationError as error:

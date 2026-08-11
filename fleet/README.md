@@ -12,11 +12,22 @@ Run these commands from the repository root:
 $env:PYTHONDONTWRITEBYTECODE = '1'
 python fleet/fleetctl.py validate --registry fleet/registry.json
 python fleet/fleetctl.py plan --registry fleet/registry.json
+python fleet/fleetctl.py status --registry fleet/registry.json --host host-bare-data-01
+python fleet/fleetctl.py inventory-plan --registry fleet/registry.json --host host-bare-data-01
 ```
 
 `validate` prints only entity counts. `plan` validates first and writes deterministic JSON to
-standard output only. Neither command creates files, reads ignored local configuration, uses the
-network, or changes a host.
+standard output only. `status` emits the existing public-safe plan fields for exactly one normalized
+stable host ID and labels that result as local evidence. `inventory-plan` emits the same status plus
+the future remote-inventory gate for that one host.
+
+All four commands are local-only: they create no files, read no ignored configuration, use no
+network, and change no host. `inventory-plan` does not resolve a private mapping, SSH alias, or
+endpoint; it explicitly reports that mapping resolution and remote contact were not performed. For a
+non-retired host, the next gate is an approved explicit-host remote adapter with DIRECT, key-only,
+tmux, provider-recovery, and redacted host-readback proof. A retired host stays blocked for both
+inventory and promotion. A local plan never promotes stale evidence, changes publication
+eligibility, or proves output, data-plane, or physical-client state.
 
 ## Data Model
 
