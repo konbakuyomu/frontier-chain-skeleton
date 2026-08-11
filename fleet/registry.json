@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "policies": [
+    {
+      "policy_id": "policy-bare-singbox-data-plane",
+      "host_role": "bare-singbox-data-plane",
+      "allowed_protocols": ["hy2", "reality", "vmess"],
+      "required_protocols": ["reality"],
+      "preferred_protocols": ["hy2"],
+      "compatibility_protocols": ["vmess"],
+      "allowed_states": ["blocked", "current", "deferred", "desired", "unknown", "unsupported"],
+      "allow_client_publications": true
+    },
+    {
+      "policy_id": "policy-business-docker",
+      "host_role": "business-docker",
+      "allowed_protocols": [],
+      "required_protocols": [],
+      "preferred_protocols": [],
+      "compatibility_protocols": [],
+      "allowed_states": ["deferred", "unknown"],
+      "allow_client_publications": false
+    },
+    {
+      "policy_id": "policy-control-plane",
+      "host_role": "control-plane",
+      "allowed_protocols": [],
+      "required_protocols": [],
+      "preferred_protocols": [],
+      "compatibility_protocols": [],
+      "allowed_states": ["deferred", "unknown"],
+      "allow_client_publications": false
+    },
+    {
+      "policy_id": "policy-edge-router",
+      "host_role": "edge-router",
+      "allowed_protocols": ["hy2", "reality", "vmess"],
+      "required_protocols": [],
+      "preferred_protocols": [],
+      "compatibility_protocols": ["vmess"],
+      "allowed_states": ["blocked", "current", "deferred", "desired", "unknown", "unsupported"],
+      "allow_client_publications": true
+    },
+    {
+      "policy_id": "policy-legacy-rollback",
+      "host_role": "legacy-rollback",
+      "allowed_protocols": ["http-socks", "hy2", "reality", "vmess"],
+      "required_protocols": [],
+      "preferred_protocols": [],
+      "compatibility_protocols": ["vmess"],
+      "allowed_states": ["deferred", "unknown"],
+      "allow_client_publications": false
+    },
+    {
+      "policy_id": "policy-public-proxy-gateway",
+      "host_role": "public-proxy-gateway",
+      "allowed_protocols": ["http-socks"],
+      "required_protocols": [],
+      "preferred_protocols": [],
+      "compatibility_protocols": [],
+      "allowed_states": ["blocked", "current", "deferred", "desired", "unknown", "unsupported"],
+      "allow_client_publications": false
+    }
+  ],
+  "hosts": [
+    {
+      "host_id": "host-bare-data-01",
+      "role": "bare-singbox-data-plane",
+      "lifecycle": "documented-snapshot",
+      "region": "eu",
+      "policy_id": "policy-bare-singbox-data-plane",
+      "display_name": "EU data plane snapshot"
+    },
+    {
+      "host_id": "host-business-01",
+      "role": "business-docker",
+      "lifecycle": "documented-snapshot",
+      "region": "global",
+      "policy_id": "policy-business-docker",
+      "display_name": "Business service boundary"
+    },
+    {
+      "host_id": "host-control-01",
+      "role": "control-plane",
+      "lifecycle": "documented-snapshot",
+      "region": "global",
+      "policy_id": "policy-control-plane",
+      "display_name": "Control plane boundary"
+    },
+    {
+      "host_id": "host-edge-01",
+      "role": "edge-router",
+      "lifecycle": "documented-snapshot",
+      "region": "us",
+      "policy_id": "policy-edge-router",
+      "display_name": "Edge route snapshot"
+    },
+    {
+      "host_id": "host-legacy-01",
+      "role": "legacy-rollback",
+      "lifecycle": "retired",
+      "region": "global",
+      "policy_id": "policy-legacy-rollback",
+      "display_name": "Legacy rollback boundary"
+    },
+    {
+      "host_id": "host-public-gateway-01",
+      "role": "public-proxy-gateway",
+      "lifecycle": "documented-snapshot",
+      "region": "global",
+      "policy_id": "policy-public-proxy-gateway",
+      "display_name": "Public gateway boundary"
+    }
+  ],
+  "endpoints": [
+    {
+      "endpoint_id": "endpoint-bare-data-hy2",
+      "host_id": "host-bare-data-01",
+      "protocol": "hy2",
+      "desired_state": "current",
+      "observed_state": "blocked",
+      "evidence_tier": "snapshot",
+      "compatibility_only": false
+    },
+    {
+      "endpoint_id": "endpoint-bare-data-reality",
+      "host_id": "host-bare-data-01",
+      "protocol": "reality",
+      "desired_state": "current",
+      "observed_state": "current",
+      "evidence_tier": "snapshot",
+      "compatibility_only": false
+    },
+    {
+      "endpoint_id": "endpoint-edge-vmess",
+      "host_id": "host-edge-01",
+      "protocol": "vmess",
+      "desired_state": "current",
+      "observed_state": "current",
+      "evidence_tier": "snapshot",
+      "compatibility_only": true
+    },
+    {
+      "endpoint_id": "endpoint-legacy-vmess",
+      "host_id": "host-legacy-01",
+      "protocol": "vmess",
+      "desired_state": "deferred",
+      "observed_state": "deferred",
+      "evidence_tier": "historical",
+      "compatibility_only": true
+    },
+    {
+      "endpoint_id": "endpoint-public-gateway-http-socks",
+      "host_id": "host-public-gateway-01",
+      "protocol": "http-socks",
+      "desired_state": "current",
+      "observed_state": "current",
+      "evidence_tier": "snapshot",
+      "compatibility_only": false
+    }
+  ],
+  "routes": [
+    {
+      "role_id": "route-bare-data-hy2",
+      "endpoint_id": "endpoint-bare-data-hy2",
+      "purpose": "fast",
+      "region": "eu",
+      "display_name": "EU HY2 route"
+    },
+    {
+      "role_id": "route-bare-data-reality",
+      "endpoint_id": "endpoint-bare-data-reality",
+      "purpose": "balanced",
+      "region": "eu",
+      "display_name": "EU Reality route"
+    },
+    {
+      "role_id": "route-edge-vmess",
+      "endpoint_id": "endpoint-edge-vmess",
+      "purpose": "compatibility",
+      "region": "us",
+      "display_name": "Edge compatibility route"
+    },
+    {
+      "role_id": "route-public-gateway-http-socks",
+      "endpoint_id": "endpoint-public-gateway-http-socks",
+      "purpose": "region-manual",
+      "region": "global",
+      "display_name": "Public gateway route"
+    }
+  ],
+  "publications": [
+    {
+      "publication_id": "publication-bare-data-hy2-final-mihomo",
+      "role_id": "route-bare-data-hy2",
+      "channel": "final-mihomo"
+    },
+    {
+      "publication_id": "publication-bare-data-hy2-hy2-only",
+      "role_id": "route-bare-data-hy2",
+      "channel": "shadowrocket-hy2-only"
+    },
+    {
+      "publication_id": "publication-bare-data-reality-final-mihomo",
+      "role_id": "route-bare-data-reality",
+      "channel": "final-mihomo"
+    },
+    {
+      "publication_id": "publication-bare-data-reality-ordinary-uri",
+      "role_id": "route-bare-data-reality",
+      "channel": "shadowrocket-ordinary-uri"
+    },
+    {
+      "publication_id": "publication-edge-vmess-final-mihomo",
+      "role_id": "route-edge-vmess",
+      "channel": "final-mihomo"
+    },
+    {
+      "publication_id": "publication-edge-vmess-ordinary-uri",
+      "role_id": "route-edge-vmess",
+      "channel": "shadowrocket-ordinary-uri"
+    }
+  ]
+}
