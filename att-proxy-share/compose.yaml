@@ -4,6 +4,11 @@ services:
     container_name: att-proxy-share
     restart: unless-stopped
     network_mode: host
+    environment:
+      - ATT_UPSTREAM_SERVER=127.0.0.1
+      - ATT_UPSTREAM_PORT=17082
+      - RESIDENTIAL64_UPSTREAM_SERVER=127.0.0.1
+      - RESIDENTIAL64_UPSTREAM_PORT=17083
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -19,6 +24,30 @@ services:
       - ./.runtime/config.json:/root/.config/mihomo/config.yaml:ro
       # Mount the whole Certbot config so live/ symlinks can resolve into archive/.
       - ./.runtime/certbot/config:/root/.config/mihomo/certs:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  egress:
+    image: metacubex/mihomo:v1.19.29
+    container_name: att-proxy-share-egress
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    volumes:
+      - ./.runtime/egress-config.json:/root/.config/mihomo/config.yaml:ro
     logging:
       driver: json-file
       options:

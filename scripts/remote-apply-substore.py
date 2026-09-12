@@ -31,6 +31,9 @@ DEFAULT_AGGREGATOR_DISPLAY_NAME = "20-原料-家宽-聚合"
 DEFAULT_AGGREGATOR_SOURCE_PREFIX = "AGG"
 DEFAULT_MIHOMO_DISPLAY_NAME = "80-输出-Sparkle-FlClash-OpenClash-最终配置"
 DEFAULT_MIHOMO_CONTENT_PLACEHOLDER = "# Sub-Store mihomoProfile placeholder\n"
+SCRIPT_OPERATOR_TYPE = "Script Operator"
+RESPONSE_TRANSFORMER_TYPE = "Response Transformer"
+MIHOMO_MAIN_OPERATOR_NAME = "frontier-chain-skeleton main.js"
 IOS_AIRPORTS_COLLECTION = "ios-airports-uri"
 IOS_AIRPORTS_DISPLAY_NAME = "81-输出-Shadowrocket-普通节点URI"
 IOS_EVOXT_HY2_COLLECTION = "ios-evoxt-hy2-shadowrocket"
@@ -478,6 +481,28 @@ def script_ops(item):
     ]
 
 
+def mihomo_process_ops(item):
+    return [
+        op for op in item.get("process", []) or []
+        if isinstance(op, dict) and op.get("type") in {SCRIPT_OPERATOR_TYPE, RESPONSE_TRANSFORMER_TYPE}
+    ]
+
+
+
+def mihomo_main_process_op(file_item, file_name):
+    matches = [
+        op for op in mihomo_process_ops(file_item)
+        if op.get("customName") == MIHOMO_MAIN_OPERATOR_NAME
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            "%s requires exactly one process operator named %r; found %d"
+            % (file_name, MIHOMO_MAIN_OPERATOR_NAME, len(matches))
+        )
+    return matches[0]
+
+
+
 def set_script_content(op, content, custom_name):
     args = op.setdefault("args", {})
     old = args.get("content") or ""
@@ -528,19 +553,34 @@ def update_collection_nodes(data, collection_name, content):
     return [collection_name] if changed else []
 
 
+def set_mihomo_extra_ai_api_hosts(data, file_name, hosts):
+    file_item = find_named(data.get("files", []), file_name)
+    if not file_item:
+        raise RuntimeError("missing file: " + file_name)
+    op = mihomo_main_process_op(file_item, file_name)
+    args = op.setdefault("args", {})
+    arguments = args.setdefault("arguments", {})
+    if not isinstance(arguments, dict):
+        arguments = {}
+        args["arguments"] = arguments
+    cleaned = []
+    for host in hosts:
+        item = str(host or "").strip().lower().rstrip(".")
+        if item and item not in cleaned:
+            cleaned.append(item)
+    if arguments.get("extra_ai_api_hosts") == cleaned:
+        return []
+    arguments["extra_ai_api_hosts"] = cleaned
+    return [file_name]
+
+
+
 def update_mihomo_main(data, file_name, content):
     file_item = find_named(data.get("files", []), file_name)
     if not file_item:
         raise RuntimeError("missing file: " + file_name)
-    ops = script_ops(file_item)
-    candidates = [
-        op for op in ops
-        if "powerfullz" not in str(op.get("customName") or "").lower()
-    ]
-    if not candidates:
-        raise RuntimeError(file_name + " has no non-powerfullz Script Operator")
-    op = candidates[-1]
-    changed = set_script_content(op, content, "frontier-chain-skeleton main.js")
+    op = mihomo_main_process_op(file_item, file_name)
+    changed = set_script_content(op, content, MIHOMO_MAIN_OPERATOR_NAME)
     changed = clear_obsolete_residential_args(op) or changed
     if file_item.get("content") != DEFAULT_MIHOMO_CONTENT_PLACEHOLDER:
         file_item["content"] = DEFAULT_MIHOMO_CONTENT_PLACEHOLDER

@@ -1,7 +1,7 @@
 # ATT public SOCKS5 / HTTP gateway
 
-This directory owns a standalone, authenticated Mihomo mixed gateway for the fixed ATT
-egress role. Recipients use a four-field handoff and select a client-compatible proxy mode;
+This directory owns a standalone, authenticated Mihomo mixed gateway for fixed ATT and
+RESIDENTIAL64 egress roles. Recipients use a four-field handoff and select a client-compatible proxy mode;
 they do not receive subscription URLs, upstream node data, or egress credentials.
 
 ## Client contract
@@ -16,7 +16,7 @@ they do not receive subscription URLs, upstream node data, or egress credentials
   protocol mismatch.
 - Legacy raw fallback: the handoff's `public-host:34567`, select plain `SOCKS5` or `HTTP` and
   leave `Proxy TLS` off. This listener is plaintext.
-- Both listeners use the same per-recipient username/password and route only to `ATT`.
+- Both listeners use the same per-recipient username/password and route to that credential's fixed role.
 - TCP only: UDP, QUIC, and UDP relay are not supported.
 - Do not stack a system proxy, a subscription proxy, and this proxy at the same time. When
   Sparkle TUN is active on Windows, keep the public gateway hostname in a local DIRECT
@@ -24,8 +24,9 @@ they do not receive subscription URLs, upstream node data, or egress credentials
 - Use HTTPS destinations through the legacy listener and treat it as a compatibility or
   diagnostic path, not the preferred mainland-client path.
 
-The generated rules remain fail-closed: each authenticated username has an `IN-USER -> ATT`
-rule and the terminal rule is `MATCH,REJECT`. There is no `DIRECT` or alternate-node fallback.
+The generated rules remain fail-closed: each authenticated username has an `IN-USER` rule to
+its stored `ATT` or `RESIDENTIAL64` role and the terminal rule is `MATCH,REJECT`. There is no
+`DIRECT` or alternate-node fallback.
 
 ## Runtime boundary
 
@@ -114,10 +115,43 @@ systemctl list-timers att-proxy-share-certbot-renew.timer
 The timer invokes only `manage.py renew-tls`; it never changes Caddy, UFW, provider firewall,
 subscriptions, or the private ATT router.
 
+## Dedicated egress roles
+
+The gateway and `att-proxy-share-egress` are a single Compose project. ATT remains the existing
+loopback-only role at `127.0.0.1:17082`. `RESIDENTIAL64` is an additive loopback-only role at
+`127.0.0.1:17083`; no new public listener or container is introduced.
+
+`residential64_egress.py` builds a candidate from the current egress JSON. It reads one raw
+Sub-Store provider URL from a root-only file and writes a separate root-only candidate file:
+
+```bash
+python3 residential64_egress.py \
+  --input .runtime/egress-config.json \
+  --provider-url-file <ROOT_ONLY_RESIDENTIAL64_PROVIDER_URL_FILE> \
+  --output .runtime/egress-config.residential64.candidate.json
+```
+
+The candidate adds only `residential64-upstreams`, `RESIDENTIAL64`, and
+`residential64-egress-in`; its provider filter is the exact normalized node name `家宽-64`.
+Its select group sets `empty-fallback: REJECT`, so an empty or unavailable provider cannot use
+Mihomo's compatible fallback.
+When the ATT provider template has an explicit cache `path`, the candidate uses that path with a
+`.residential64` suffix and refuses a collision with any existing provider path.
+The provider URL must address the raw `residential-64` source after its normalization read-back,
+never a final client profile. The command prints counts and status only; the raw URL remains in
+the root-only input and candidate output.
+
+Existing users without `logical_role` normalize to `ATT`. Create the new isolated identity with
+`python3 manage.py add <label> --role RESIDENTIAL64`; rotation retains the stored role.
+
+Health of both `att-proxy-share` and `att-proxy-share-egress` is covered by
+`sjc-capacity-guard.py` (see `/etc/vps-capacity-guard/sjc.json` `health_checks`).
+
 ## Credential commands
 
 ```bash
 python3 manage.py add friend-a
+python3 manage.py add cpa-residential --role RESIDENTIAL64
 python3 manage.py list
 python3 manage.py status
 python3 manage.py rotate friend-a

@@ -57,10 +57,15 @@ TLS_CERT_PATH = f"{TLS_CERT_CONTAINER_DIR}/live/{TLS_PUBLIC_HOST}/{TLS_CERT_FILE
 TLS_KEY_PATH = f"{TLS_CERT_CONTAINER_DIR}/live/{TLS_PUBLIC_HOST}/{TLS_KEY_FILENAME}"
 TLS_CERT_MIN_VALIDITY_SECONDS = 7 * 24 * 60 * 60
 SYSTEM_CA_BUNDLE = Path("/etc/ssl/certs/ca-certificates.crt")
-UPSTREAM_SERVER = "172.19.0.1"
-UPSTREAM_PORT = 1082
+UPSTREAM_SERVER = os.environ.get("ATT_UPSTREAM_SERVER", "127.0.0.1")
+UPSTREAM_PORT = int(os.environ.get("ATT_UPSTREAM_PORT", "17082"))
+RESIDENTIAL64_UPSTREAM_SERVER = os.environ.get("RESIDENTIAL64_UPSTREAM_SERVER", "127.0.0.1")
+RESIDENTIAL64_UPSTREAM_PORT = int(os.environ.get("RESIDENTIAL64_UPSTREAM_PORT", "17083"))
 SCHEMA_VERSION = 1
-ROLE = "ATT"
+ATT_ROLE = "ATT"
+RESIDENTIAL64_ROLE = "RESIDENTIAL64"
+ROLE = ATT_ROLE
+SUPPORTED_ROLES = (ATT_ROLE, RESIDENTIAL64_ROLE)
 PROTOCOLS = ["socks5", "http"]
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 TOKEN_ALPHABET = string.ascii_letters + string.digits
@@ -203,6 +208,12 @@ def validate_name(name: str) -> str:
     return name
 
 
+def validate_role(value: Any) -> str:
+    if value not in SUPPORTED_ROLES:
+        fail("credential role must be ATT or RESIDENTIAL64")
+    return value
+
+
 def validate_port(value: Any) -> int:
     try:
         port = int(value)
@@ -241,10 +252,10 @@ def normalize_user(label: str, item: Any) -> dict[str, Any]:
         fail(f"invalid credential username for {label}")
     if not isinstance(password, str) or not password or any(ch.isspace() for ch in password):
         fail(f"invalid credential password for {label}")
-    logical_role = item.get("logical_role", ROLE)
+    logical_role = validate_role(item.get("logical_role", ROLE))
     protocols = item.get("protocols", PROTOCOLS)
-    if logical_role != ROLE or protocols != PROTOCOLS:
-        fail(f"credential {label} must use the fixed ATT SOCKS5/HTTP role")
+    if protocols != PROTOCOLS:
+        fail(f"credential {label} must use the fixed SOCKS5/HTTP protocols")
     try:
         created_at = int(item.get("created_at", 0))
     except (TypeError, ValueError):
@@ -254,7 +265,7 @@ def normalize_user(label: str, item: Any) -> dict[str, Any]:
     return {
         "username": username,
         "password": password,
-        "logical_role": ROLE,
+        "logical_role": logical_role,
         "protocols": list(PROTOCOLS),
         "created_at": created_at,
     }
@@ -356,6 +367,22 @@ def config_for(state: dict[str, Any]) -> dict[str, Any]:
         ]
         + ["MATCH,REJECT"],
     }
+    if any(item["logical_role"] == RESIDENTIAL64_ROLE for item in users.values()):
+        config["proxies"].append(
+            {
+                "name": "RESIDENTIAL64-UPSTREAM",
+                "type": "http",
+                "server": RESIDENTIAL64_UPSTREAM_SERVER,
+                "port": RESIDENTIAL64_UPSTREAM_PORT,
+            }
+        )
+        config["proxy-groups"].append(
+            {
+                "name": RESIDENTIAL64_ROLE,
+                "type": "select",
+                "proxies": ["RESIDENTIAL64-UPSTREAM"],
+            }
+        )
     if users:
         config["authentication"] = [
             f"{item['username']}:{item['password']}" for item in users.values()
@@ -969,7 +996,8 @@ def print_result(message: str) -> None:
     print(message)
 
 
-def new_credential(state: dict[str, Any]) -> dict[str, Any]:
+def new_credential(state: dict[str, Any], *, role: str = ROLE) -> dict[str, Any]:
+    role = validate_role(role)
     usernames = {item["username"] for item in state["users"].values()}
     username = f"att-{token(10)}"
     while username in usernames:
@@ -977,7 +1005,7 @@ def new_credential(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "username": username,
         "password": token(32),
-        "logical_role": ROLE,
+        "logical_role": role,
         "protocols": list(PROTOCOLS),
         "created_at": int(time.time()),
     }
@@ -985,12 +1013,13 @@ def new_credential(state: dict[str, Any]) -> dict[str, Any]:
 
 def cmd_add(args: argparse.Namespace) -> None:
     name = validate_name(args.name)
+    role = validate_role(getattr(args, "role", ROLE))
     state = load_state()
     if name in state["users"]:
         fail(f"user already exists: {name}; rotate it instead")
     candidate = dict(state)
     candidate["users"] = dict(state["users"])
-    candidate["users"][name] = new_credential(state)
+    candidate["users"][name] = new_credential(state, role=role)
     path = write_handoff(candidate, name, candidate["users"][name])
     try:
         apply_state(state, candidate)
@@ -1000,7 +1029,7 @@ def cmd_add(args: argparse.Namespace) -> None:
         raise
     item = candidate["users"][name]
     print_result(
-        f"created label={name} role={ROLE} protocols=socks5,http "
+        f"created label={name} role={role} protocols=socks5,http "
         f"handoff={path} credential_fingerprint={credential_fingerprint(item)} "
         f"preferred_host={TLS_PUBLIC_HOST} preferred_port={TLS_PORT} preferred_proxy_tls=on"
     )
@@ -1028,7 +1057,8 @@ def cmd_rotate(args: argparse.Namespace) -> None:
         fail(f"user not found: {name}")
     candidate = dict(state)
     candidate["users"] = dict(state["users"])
-    candidate["users"][name] = new_credential(state)
+    role = state["users"][name]["logical_role"]
+    candidate["users"][name] = new_credential(state, role=role)
     path = handoff_path(name)
     old_handoff = read_bytes(path)
     write_handoff(candidate, name, candidate["users"][name])
@@ -1039,7 +1069,7 @@ def cmd_rotate(args: argparse.Namespace) -> None:
         raise
     item = candidate["users"][name]
     print_result(
-        f"rotated label={name} handoff={path} credential_fingerprint={credential_fingerprint(item)} "
+        f"rotated label={name} role={role} handoff={path} credential_fingerprint={credential_fingerprint(item)} "
         f"preferred_host={TLS_PUBLIC_HOST} preferred_port={TLS_PORT} preferred_proxy_tls=on"
     )
 
@@ -1179,6 +1209,7 @@ def parser() -> argparse.ArgumentParser:
 
     add = sub.add_parser("add", help="create one credential and start the proxy")
     add.add_argument("name")
+    add.add_argument("--role", choices=SUPPORTED_ROLES, default=ROLE)
     add.set_defaults(func=cmd_add)
 
     remove = sub.add_parser("remove", help="revoke one credential")
