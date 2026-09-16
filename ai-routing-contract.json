@@ -1,0 +1,128 @@
+{
+  "$schema": "./ai-routing-contract.schema.json",
+  "version": 1,
+  "services": {
+    "openai": {
+      "required": [
+        {"type": "suffix", "value": "chatgpt.com"},
+        {"type": "suffix", "value": "openai.com"},
+        {"type": "suffix", "value": "oaistatic.com"},
+        {"type": "suffix", "value": "oaiusercontent.com"},
+        {"type": "suffix", "value": "oaistatsig.com"},
+        {"type": "domain", "value": "cdn.openaimerge.com"},
+        {"type": "domain", "value": "api.openai.com"},
+        {"type": "domain", "value": "auth.openai.com"}
+      ],
+      "conditional": [],
+      "shared_not_ai": [
+        {"type": "domain", "value": "github.com"},
+        {"type": "domain", "value": "registry.npmjs.org"},
+        {"type": "suffix", "value": "cloudflare.com"},
+        {"type": "suffix", "value": "cloudflare.net"},
+        {"type": "suffix", "value": "googleapis.com"},
+        {"type": "suffix", "value": "sentry.io"},
+        {"type": "suffix", "value": "datadoghq.com"},
+        {"type": "suffix", "value": "statsig.com"},
+        {"type": "suffix", "value": "statsigapi.net"},
+        {"type": "suffix", "value": "intercom.io"},
+        {"type": "suffix", "value": "intercomcdn.com"},
+        {"type": "suffix", "value": "livekit.cloud"},
+        {"type": "suffix", "value": "arkoselabs.com"},
+        {"type": "suffix", "value": "azureedge.net"},
+        {"type": "suffix", "value": "blob.core.windows.net"},
+        {"type": "suffix", "value": "website-files.com"},
+        {"type": "suffix", "value": "featuregates.org"},
+        {"type": "suffix", "value": "imgix.net"},
+        {"type": "suffix", "value": "auth0.com"},
+        {"type": "suffix", "value": "b-cdn.net"},
+        {"type": "suffix", "value": "sift.com"},
+        {"type": "suffix", "value": "siftscience.com"},
+        {"type": "domain", "value": "ct.sendgrid.net"},
+        {"type": "domain", "value": "cdn.workos.com"},
+        {"type": "domain", "value": "forwarder.workos.com"},
+        {"type": "domain", "value": "setup.workos.com"},
+        {"type": "domain", "value": "images.workoscdn.com"},
+        {"type": "domain", "value": "humb.apple.com"},
+        {"type": "domain", "value": "js.stripe.com"}
+      ],
+      "negative": []
+    },
+    "anthropic": {
+      "required": [
+        {"type": "suffix", "value": "anthropic.com"},
+        {"type": "domain", "value": "api.anthropic.com"}
+      ],
+      "conditional": [
+        {"type": "suffix", "value": "claude.ai", "emit": true},
+        {"type": "suffix", "value": "claude.com", "emit": true},
+        {"type": "suffix", "value": "claudeusercontent.com", "emit": true},
+        {"type": "suffix", "value": "claudemcpclient.com", "emit": true},
+        {"type": "suffix", "value": "claudemcpcontent.com", "emit": true},
+        {"type": "suffix", "value": "clau.de", "emit": true},
+        {"type": "domain", "value": "platform.claude.com", "emit": true},
+        {"type": "domain", "value": "mcp-proxy.anthropic.com", "emit": true},
+        {"type": "domain", "value": "bridge.claudeusercontent.com", "emit": true},
+        {"type": "domain", "value": "downloads.claude.ai", "emit": true}
+      ],
+      "shared_not_ai": [
+        {"type": "domain", "value": "storage.googleapis.com"},
+        {"type": "suffix", "value": "githubusercontent.com"},
+        {"type": "domain", "value": "fonts.googleapis.com"},
+        {"type": "domain", "value": "fonts.gstatic.com"},
+        {"type": "domain", "value": "http-intake.logs.us5.datadoghq.com"},
+        {"type": "domain", "value": "browser-intake-us5-datadoghq.com"}
+      ],
+      "negative": []
+    },
+    "xai": {
+      "required": [
+        {"type": "domain", "value": "grok.com"},
+        {"type": "domain", "value": "cdn.grok.com"},
+        {"type": "domain", "value": "api.x.ai"}
+      ],
+      "conditional": [
+        {"type": "suffix", "value": "x.ai", "emit": true},
+        {"type": "domain", "value": "assets.grok.com", "emit": true},
+        {"type": "domain", "value": "grok.x.com", "emit": true}
+      ],
+      "shared_not_ai": [
+        {"type": "domain", "value": "abs.twimg.com"}
+      ],
+      "negative": [
+        {"type": "domain", "value": "x.com"}
+      ]
+    }
+  },
+  "evidence": [
+    {
+      "service": "openai",
+      "url": "https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-and-the-api",
+      "verified_at": "2026-08-18"
+    },
+    {
+      "service": "anthropic",
+      "url": "https://code.claude.com/docs/en/network-config",
+      "verified_at": "2026-09-04"
+    },
+    {
+      "service": "xai",
+      "url": "https://docs.x.ai/developers/rest-api-reference",
+      "verified_at": "2026-08-18"
+    },
+    {
+      "service": "xai",
+      "url": "https://docs.x.ai/developers/quickstart",
+      "verified_at": "2026-08-18"
+    },
+    {
+      "service": "xai",
+      "url": "https://x.ai/legal/faq",
+      "verified_at": "2026-08-18"
+    },
+    {
+      "service": "xai",
+      "url": "https://help.x.com/en/using-x/about-grok",
+      "verified_at": "2026-08-18"
+    }
+  ]
+}

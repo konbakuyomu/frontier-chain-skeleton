@@ -9,6 +9,7 @@ default. Git-tracked files must remain public-safe.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import secrets
 import shlex
@@ -51,6 +52,20 @@ def die(message: str) -> None:
 
 def yaml_sq(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def mbps_value(value: str) -> int:
+    normalized = value.strip().lower().replace("mbps", " mbps")
+    parts = normalized.split()
+    if len(parts) != 2 or parts[1] != "mbps":
+        die(f"bandwidth value must look like '100 Mbps': {value}")
+    try:
+        mbps = int(parts[0])
+    except ValueError:
+        die(f"bandwidth value must use integer Mbps: {value}")
+    if mbps <= 0:
+        die(f"bandwidth value must be positive: {value}")
+    return mbps
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -350,12 +365,86 @@ socks5:
     up: {yaml_sq(env['SHARED_HY2_CLIENT_UP'])}
     down: {yaml_sq(env['SHARED_HY2_CLIENT_DOWN'])}
 """
+    mihomo_profile_yaml = f"""# Generated private Mihomo profile for {user_id}
+# Import this whole file into Clash Verge / Sparkle / other Mihomo clients.
+allow-lan: false
+mode: rule
+log-level: warning
+ipv6: false
+
+proxies:
+  - name: {yaml_sq(str(user['display']))}
+    type: hysteria2
+    server: {yaml_sq(host)}
+    port: {port}
+    password: {yaml_sq(auth)}
+    udp: true
+    sni: {yaml_sq(sni)}
+    skip-cert-verify: {'true' if insecure else 'false'}
+    up: {yaml_sq(env['SHARED_HY2_CLIENT_UP'])}
+    down: {yaml_sq(env['SHARED_HY2_CLIENT_DOWN'])}
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - {yaml_sq(str(user['display']))}
+
+rules:
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+  - IP-CIDR6,fc00::/7,DIRECT,no-resolve
+  - IP-CIDR6,fe80::/10,DIRECT,no-resolve
+  - MATCH,PROXY
+"""
+    sing_box_config = {
+        "log": {"level": "warn"},
+        "inbounds": [
+            {
+                "type": "mixed",
+                "tag": "mixed-in",
+                "listen": "127.0.0.1",
+                "listen_port": 1080,
+            }
+        ],
+        "outbounds": [
+            {
+                "type": "hysteria2",
+                "tag": "proxy",
+                "server": host,
+                "server_port": port,
+                "password": auth,
+                "up_mbps": mbps_value(env["SHARED_HY2_CLIENT_UP"]),
+                "down_mbps": mbps_value(env["SHARED_HY2_CLIENT_DOWN"]),
+                "tls": {
+                    "enabled": True,
+                    "server_name": sni,
+                    "insecure": insecure,
+                },
+            },
+            {"type": "direct", "tag": "direct"},
+        ],
+        "route": {
+            "rules": [
+                {"ip_cidr": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "fc00::/7", "fe80::/10"], "outbound": "direct"}
+            ],
+            "final": "proxy",
+        },
+    }
+    sing_box_v2rayn_config = copy.deepcopy(sing_box_config)
+    sing_box_v2rayn_config["inbounds"][0]["listen_port"] = 10808
     query = f"sni={quote(sni)}&insecure={'1' if insecure else '0'}"
     uri = f"hysteria2://{quote(auth, safe='')}@{host}:{port}/?{query}#{quote(str(user['display']))}\n"
     user_dir = out_dir / user_id
     user_dir.mkdir(parents=True, exist_ok=True)
     (user_dir / "hysteria-client.yaml").write_text(client_yaml, encoding="utf-8", newline="\n")
     (user_dir / "mihomo.yaml").write_text(mihomo_yaml, encoding="utf-8", newline="\n")
+    (user_dir / "mihomo-profile.yaml").write_text(mihomo_profile_yaml, encoding="utf-8", newline="\n")
+    (user_dir / "sing-box-client.json").write_text(json.dumps(sing_box_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    (user_dir / "sing-box-v2rayn.json").write_text(json.dumps(sing_box_v2rayn_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     (user_dir / "uri.txt").write_text(uri, encoding="utf-8", newline="\n")
 
 

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI routing official coverage contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "services", "evidence"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "version": {"const": 1},
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["openai", "anthropic", "xai"],
+      "properties": {
+        "openai": {"$ref": "#/$defs/service"},
+        "anthropic": {"$ref": "#/$defs/service"},
+        "xai": {"$ref": "#/$defs/service"}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 3,
+      "items": {"$ref": "#/$defs/evidence"}
+    }
+  },
+  "$defs": {
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "conditional", "shared_not_ai", "negative"],
+      "properties": {
+        "required": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/rule"}},
+        "conditional": {"type": "array", "items": {"$ref": "#/$defs/rule"}},
+        "shared_not_ai": {"type": "array", "items": {"$ref": "#/$defs/rule"}},
+        "negative": {"type": "array", "items": {"$ref": "#/$defs/rule"}}
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"enum": ["domain", "suffix", "regex"]},
+        "value": {"type": "string", "minLength": 1},
+        "emit": {"type": "boolean"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service", "url", "verified_at"],
+      "properties": {
+        "service": {"enum": ["openai", "anthropic", "xai"]},
+        "url": {"type": "string", "pattern": "^https://"},
+        "verified_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+      }
+    }
+  }
+}

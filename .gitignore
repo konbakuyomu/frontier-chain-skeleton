@@ -1,4 +1,5 @@
 creds.local.js
+extra-ai-hosts.local.js
 _staging/
 __pycache__/
 *.bak
@@ -10,3 +11,8 @@ frontier-edge/.secrets.local/
 shared-hy2/.secrets.local/
 subscription-hub/.secrets.local/
 att-proxy-share/.runtime/
+# >>> Comet managed project state >>>
+!/.comet/
+/.comet/*
+!/.comet/config.yaml
+# <<< Comet managed project state <<<

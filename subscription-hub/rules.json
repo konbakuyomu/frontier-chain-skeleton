@@ -1,9 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "rules_path_prefix": "/rules",
   "items": [
     {
       "id": "sr-paypal",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -12,6 +13,7 @@
     },
     {
       "id": "sr-advertising-domain",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "DOMAIN-SET",
       "format": "text",
@@ -20,6 +22,7 @@
     },
     {
       "id": "sr-advertising",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -27,15 +30,96 @@
       "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Advertising/Advertising.list"
     },
     {
-      "id": "sr-ai",
+      "id": "sr-ai-legacy",
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
       "file": "shadowrocket-ai.list",
-      "source": "https://cdn.jsdelivr.net/gh/LingJingMaster/Shadowrocket-Rules@main/AI.list"
+      "source": "https://cdn.jsdelivr.net/gh/LingJingMaster/Shadowrocket-Rules@main/AI.list",
+      "enabled": false,
+      "legacy_of": "ai-community-supplement"
+    },
+    {
+      "id": "sr-ai-openai-v2",
+      "enabled": true,
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-ai-openai-v2.list",
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/openai",
+      "semantic_source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/openai",
+      "adapter": "domain-list-to-classical",
+      "logical_provider": "ai-openai",
+      "covers": ["openai"],
+      "allowed_attributes": ["ads"],
+      "allowed_regex_exclusions": [
+        "^chatgpt-async-webps-prod-\\S+-\\d+\\.webpubsub\\.azure\\.com$"
+      ],
+      "semantic_required": [
+        {"type": "suffix", "value": "openai.com"},
+        {"type": "suffix", "value": "chatgpt.com"},
+        {"type": "suffix", "value": "oaistatic.com"},
+        {"type": "suffix", "value": "oaiusercontent.com"},
+        {"type": "suffix", "value": "oaistatsig.com"}
+      ]
+    },
+    {
+      "id": "sr-ai-anthropic-v2",
+      "enabled": true,
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-ai-anthropic-v2.list",
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic",
+      "semantic_source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic",
+      "adapter": "domain-list-to-classical",
+      "logical_provider": "ai-anthropic",
+      "covers": ["anthropic"],
+      "semantic_required": [
+        {"type": "suffix", "value": "anthropic.com"},
+        {"type": "domain", "value": "api.anthropic.com"},
+        {"type": "suffix", "value": "claude.ai"},
+        {"type": "suffix", "value": "claude.com"},
+        {"type": "suffix", "value": "claudeusercontent.com"},
+        {"type": "suffix", "value": "claudemcpclient.com"},
+        {"type": "suffix", "value": "claudemcpcontent.com"},
+        {"type": "suffix", "value": "clau.de"}
+      ]
+    },
+    {
+      "id": "sr-ai-xai-v2",
+      "enabled": true,
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-ai-xai-v2.list",
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/xai",
+      "semantic_source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/xai",
+      "adapter": "domain-list-to-classical",
+      "logical_provider": "ai-xai",
+      "covers": ["xai"],
+      "semantic_required": [
+        {"type": "domain", "value": "grok.com"},
+        {"type": "domain", "value": "cdn.grok.com"},
+        {"type": "domain", "value": "api.x.ai"}
+      ]
+    },
+    {
+      "id": "sr-ai-community-supplement-v2",
+      "enabled": true,
+      "client": "shadowrocket",
+      "rule_type": "RULE-SET",
+      "format": "text",
+      "file": "shadowrocket-ai-community-supplement-v2.list",
+      "source": "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.list",
+      "semantic_source": "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.list",
+      "adapter": "domain-list-to-classical",
+      "logical_provider": "ai-community-supplement",
+      "covers": []
     },
     {
       "id": "sr-google",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -44,6 +128,7 @@
     },
     {
       "id": "sr-youtube",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -52,6 +137,7 @@
     },
     {
       "id": "sr-lan",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -60,6 +146,7 @@
     },
     {
       "id": "sr-telegram",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -68,6 +155,7 @@
     },
     {
       "id": "sr-github",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -76,6 +164,7 @@
     },
     {
       "id": "sr-gitlab",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -84,6 +173,7 @@
     },
     {
       "id": "sr-atlassian",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -92,6 +182,7 @@
     },
     {
       "id": "sr-microsoft",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -100,6 +191,7 @@
     },
     {
       "id": "sr-apple-domain",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "DOMAIN-SET",
       "format": "text",
@@ -108,6 +200,7 @@
     },
     {
       "id": "sr-apple",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -116,6 +209,7 @@
     },
     {
       "id": "sr-china-domain",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "DOMAIN-SET",
       "format": "text",
@@ -124,6 +218,7 @@
     },
     {
       "id": "sr-china",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -132,6 +227,7 @@
     },
     {
       "id": "sr-global-domain",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "DOMAIN-SET",
       "format": "text",
@@ -140,6 +236,7 @@
     },
     {
       "id": "sr-global",
+      "enabled": true,
       "client": "shadowrocket",
       "rule_type": "RULE-SET",
       "format": "text",
@@ -147,31 +244,120 @@
       "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Shadowrocket/Global/Global.list"
     },
     {
-      "id": "mihomo-ai-dustin",
+      "id": "mihomo-ai-dustin-legacy",
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "mrs",
       "file": "mihomo-ai-dustin.mrs",
-      "source": "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.mrs"
+      "source": "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.mrs",
+      "enabled": false,
+      "legacy_of": "ai-community-supplement"
     },
     {
-      "id": "mihomo-ai-openai",
+      "id": "mihomo-ai-openai-legacy",
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
       "file": "mihomo-ai-openai.list",
-      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.list"
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/OpenAI/OpenAI.list",
+      "enabled": false,
+      "legacy_of": "ai-openai"
     },
     {
-      "id": "mihomo-ai-claude",
+      "id": "mihomo-ai-claude-legacy",
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
       "file": "mihomo-ai-claude.list",
-      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.list"
+      "source": "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Claude/Claude.list",
+      "enabled": false,
+      "legacy_of": "ai-anthropic"
+    },
+    {
+      "id": "mihomo-ai-openai-v2",
+      "enabled": true,
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-ai-openai-v2.list",
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/openai",
+      "semantic_source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/openai",
+      "adapter": "domain-list-to-classical",
+      "logical_provider": "ai-openai",
+      "provider_behavior": "classical",
+      "covers": ["openai"],
+      "allowed_attributes": ["ads"],
+      "allowed_regex_exclusions": [
+        "^chatgpt-async-webps-prod-\\S+-\\d+\\.webpubsub\\.azure\\.com$"
+      ],
+      "semantic_required": [
+        {"type": "suffix", "value": "openai.com"},
+        {"type": "suffix", "value": "chatgpt.com"},
+        {"type": "suffix", "value": "oaistatic.com"},
+        {"type": "suffix", "value": "oaiusercontent.com"},
+        {"type": "suffix", "value": "oaistatsig.com"}
+      ]
+    },
+    {
+      "id": "mihomo-ai-anthropic-v2",
+      "enabled": true,
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-ai-anthropic-v2.list",
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic",
+      "semantic_source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/anthropic",
+      "adapter": "domain-list-to-classical",
+      "logical_provider": "ai-anthropic",
+      "provider_behavior": "classical",
+      "covers": ["anthropic"],
+      "semantic_required": [
+        {"type": "suffix", "value": "anthropic.com"},
+        {"type": "domain", "value": "api.anthropic.com"},
+        {"type": "suffix", "value": "claude.ai"},
+        {"type": "suffix", "value": "claude.com"},
+        {"type": "suffix", "value": "claudeusercontent.com"},
+        {"type": "suffix", "value": "claudemcpclient.com"},
+        {"type": "suffix", "value": "claudemcpcontent.com"},
+        {"type": "suffix", "value": "clau.de"}
+      ]
+    },
+    {
+      "id": "mihomo-ai-xai-v2",
+      "enabled": true,
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-ai-xai-v2.list",
+      "source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/xai",
+      "semantic_source": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/xai",
+      "adapter": "domain-list-to-classical",
+      "logical_provider": "ai-xai",
+      "provider_behavior": "classical",
+      "covers": ["xai"],
+      "semantic_required": [
+        {"type": "domain", "value": "grok.com"},
+        {"type": "domain", "value": "cdn.grok.com"},
+        {"type": "domain", "value": "api.x.ai"}
+      ]
+    },
+    {
+      "id": "mihomo-ai-community-supplement-v2",
+      "enabled": true,
+      "client": "mihomo",
+      "rule_type": "rule-provider",
+      "format": "text",
+      "file": "mihomo-ai-community-supplement-v2.list",
+      "source": "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.list",
+      "semantic_source": "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/ai.list",
+      "adapter": "domain-list-to-classical",
+      "logical_provider": "ai-community-supplement",
+      "provider_behavior": "classical",
+      "covers": []
     },
     {
       "id": "mihomo-ai-gemini",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -180,6 +366,7 @@
     },
     {
       "id": "mihomo-paypal-meta",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "mrs",
@@ -188,6 +375,7 @@
     },
     {
       "id": "mihomo-paypal-cn-meta",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "mrs",
@@ -196,6 +384,7 @@
     },
     {
       "id": "mihomo-gfwlist-loyalsoldier",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -204,6 +393,7 @@
     },
     {
       "id": "mihomo-adblock-217heidai",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "yaml",
@@ -212,6 +402,7 @@
     },
     {
       "id": "mihomo-powerfullz-additional-cdn-resources",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -220,6 +411,7 @@
     },
     {
       "id": "mihomo-powerfullz-additional-filter",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -228,6 +420,7 @@
     },
     {
       "id": "mihomo-powerfullz-crypto",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -236,6 +429,7 @@
     },
     {
       "id": "mihomo-powerfullz-ehentai",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -244,6 +438,7 @@
     },
     {
       "id": "mihomo-powerfullz-googlefcm",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -252,6 +447,7 @@
     },
     {
       "id": "mihomo-powerfullz-steamfix",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -260,6 +456,7 @@
     },
     {
       "id": "mihomo-powerfullz-tiktok",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",
@@ -268,6 +465,7 @@
     },
     {
       "id": "mihomo-powerfullz-weibo",
+      "enabled": true,
       "client": "mihomo",
       "rule_type": "rule-provider",
       "format": "text",

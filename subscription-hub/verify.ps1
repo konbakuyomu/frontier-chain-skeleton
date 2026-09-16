@@ -103,8 +103,15 @@ function Get-ScpArgs {
 
 function Get-BodyShape($Label, $Text) {
   if ($Label -eq 'sparkle') {
-    if ($Text -notmatch '(?m)^proxies:\s*$' -or $Text -notmatch '(?m)^proxy-groups:\s*$') {
-      throw 'sparkle endpoint is not a full mihomo profile'
+    $requiredSections = @('proxies', 'proxy-groups', 'rules', 'rule-providers', 'dns')
+    $missingSections = @()
+    foreach ($section in $requiredSections) {
+      if ($Text -notmatch "(?m)^$([regex]::Escape($section)):\s*") {
+        $missingSections += $section
+      }
+    }
+    if ($missingSections.Count -gt 0) {
+      throw "sparkle endpoint is not a full mihomo profile; missing sections: $($missingSections -join ', ')"
     }
     return 'mihomo-profile'
   }
@@ -137,18 +144,45 @@ function Get-RuleRegistry($Path) {
   $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
   $registry = $raw | ConvertFrom-Json
   if (-not $registry.items -or $registry.items.Count -le 0) { throw 'rule registry has no items' }
-  $srCount = @($registry.items | Where-Object { $_.client -eq 'shadowrocket' }).Count
-  $mihomoCount = @($registry.items | Where-Object { $_.client -eq 'mihomo' }).Count
-  if ($srCount -ne 18) { throw "expected 18 Shadowrocket rule mirrors, got $srCount" }
-  if ($mihomoCount -ne 16) { throw "expected 16 Mihomo rule mirrors, got $mihomoCount" }
+  if ($registry.version -ne 2) { throw "rule registry version must be 2, got $($registry.version)" }
+  if (-not $registry.rules_path_prefix -or -not $registry.rules_path_prefix.StartsWith('/')) { throw 'rule registry rules_path_prefix must start with /' }
+  $activeItems = @($registry.items | Where-Object { $_.enabled -ne $false })
+  $srCount = @($activeItems | Where-Object { $_.client -eq 'shadowrocket' }).Count
+  $mihomoCount = @($activeItems | Where-Object { $_.client -eq 'mihomo' }).Count
+  $srLogicalCount = @($activeItems | Where-Object { $_.client -eq 'shadowrocket' -and $_.logical_provider }).Count
+  $mihomoLogicalCount = @($activeItems | Where-Object { $_.client -eq 'mihomo' -and $_.logical_provider }).Count
+  if ($srCount -le 0 -or $mihomoCount -le 0) { throw 'active registry must include both Shadowrocket and Mihomo mirrors' }
   $seen = @{}
-  foreach ($item in $registry.items) {
+  foreach ($item in $activeItems) {
     if ($item.id -notmatch '^[a-z0-9][a-z0-9-]*$') { throw "invalid rule id: $($item.id)" }
     if ($item.file -notmatch '^[A-Za-z0-9._-]+$') { throw "invalid rule file: $($item.file)" }
     if ($seen.ContainsKey($item.file)) { throw "duplicate rule file: $($item.file)" }
     $seen[$item.file] = $true
   }
-  return $registry
+  $requiredLogicalProviders = @('ai-openai', 'ai-anthropic', 'ai-xai', 'ai-community-supplement')
+  foreach ($client in @('shadowrocket', 'mihomo')) {
+    $logicalItems = @($activeItems | Where-Object { $_.client -eq $client -and $_.logical_provider })
+    foreach ($logicalProvider in $requiredLogicalProviders) {
+      if (@($logicalItems | Where-Object { $_.logical_provider -eq $logicalProvider }).Count -ne 1) {
+        throw "active $client registry must contain exactly one $logicalProvider logical provider"
+      }
+    }
+    if (@($logicalItems | Where-Object { $_.format -eq 'mrs' }).Count -gt 0) {
+      throw "active $client logical providers must not publish opaque MRS"
+    }
+  }
+  return [pscustomobject]@{
+    items = $activeItems
+    rules_path_prefix = $registry.rules_path_prefix
+    counts = [pscustomobject]@{
+      total = $activeItems.Count
+      disabled = @($registry.items | Where-Object { $_.enabled -eq $false }).Count
+      shadowrocket = $srCount
+      mihomo = $mihomoCount
+      shadowrocket_logical = $srLogicalCount
+      mihomo_logical = $mihomoLogicalCount
+    }
+  }
 }
 
 function Get-RuleMirrorShape($Item, $Text, [int]$Bytes) {
@@ -166,6 +200,9 @@ function Get-RuleMirrorShape($Item, $Text, [int]$Bytes) {
   $payloadDomain = ($lines | Where-Object { $_ -eq 'payload:' } | Select-Object -First 1) -and ($lines | Where-Object { $_ -match "^\s*-\s*['""]?\+?\.[^'""]+\.[^'""]+['""]?\s*$" } | Select-Object -First 1)
   if (-not ($lines | Where-Object { $_ -match ',' } | Select-Object -First 1) -and -not $payloadDomain) {
     throw "text rule mirror shape mismatch: $($Item.id)"
+  }
+  if ($Item.logical_provider -and ($lines | Where-Object { $_ -match '^DOMAIN-SUFFIX\s*,\s*x[.]com\s*$' } | Select-Object -First 1)) {
+    throw "logical AI mirror contains forbidden broad x.com rule: $($Item.id)"
   }
   if ($payloadDomain) { return 'payload-domain' }
   return 'text-rule'
@@ -209,7 +246,9 @@ raise SystemExit(proc.returncode)
     } else {
       $result = & curl.exe @args
     }
-    if ($LASTEXITCODE -eq 0 -or $attempt -eq [Math]::Max(1, $HttpAttempts)) {
+    $httpCode = ($result -join '').Trim()
+    $retryableHttp = $httpCode -match '^5[0-9][0-9]$'
+    if (($LASTEXITCODE -eq 0 -and -not $retryableHttp) -or $attempt -eq [Math]::Max(1, $HttpAttempts)) {
       return $result
     }
     if ($HttpRetryDelaySeconds -gt 0) {
@@ -231,7 +270,7 @@ foreach ($pair in @(
 Write-Ok 'subscription hub parameter shape passed'
 
 $ruleRegistry = Get-RuleRegistry $RuleRegistryPath
-Write-Ok ("rule registry shape passed: total={0} shadowrocket=18 mihomo=16" -f $ruleRegistry.items.Count)
+Write-Ok ("rule registry shape passed: total={0} disabled={1} shadowrocket={2} mihomo={3}" -f $ruleRegistry.counts.total, $ruleRegistry.counts.disabled, $ruleRegistry.counts.shadowrocket, $ruleRegistry.counts.mihomo)
 
 if ($SkipHttp) {
   Write-Warn2 'HTTP checks skipped'
@@ -310,6 +349,61 @@ if ($LASTEXITCODE -ne 0) { throw 'curl authorized status check failed' }
 if ($statusAuthCode -ne '200') { throw "expected authorized status HTTP 200, got $statusAuthCode" }
 Write-Ok 'protected status json authorized responds'
 
+$ruleStatusTmp = New-TemporaryFile
+try {
+  $ruleStatusPath = $ruleRegistry.rules_path_prefix.TrimEnd('/') + '/status.json'
+  $ruleStatusOut = if ($RemoteCheckHost) { '/tmp/subscription-hub-rule-status' } else { $ruleStatusTmp.FullName }
+  $ruleStatusCode = Invoke-HubCurl -Path $ruleStatusPath -OutputPath $ruleStatusOut
+  if ($LASTEXITCODE -ne 0) { throw 'curl rule semantic status check failed' }
+  if ($ruleStatusCode -ne '200') { throw "expected rule semantic status HTTP 200, got $ruleStatusCode" }
+  if ($RemoteCheckHost) {
+    $sshArgs = Get-SshArgs $RemoteCheckHost
+    $ruleStatusText = & ssh @sshArgs "cat '$ruleStatusOut'; rm -f '$ruleStatusOut'"
+    $ruleStatusText = $ruleStatusText -join "`n"
+  } else {
+    $ruleStatusText = Get-Content -LiteralPath $ruleStatusTmp.FullName -Raw -Encoding UTF8
+  }
+  $ruleSemanticStatus = $ruleStatusText | ConvertFrom-Json
+  if ($ruleSemanticStatus.summary.total -ne $ruleRegistry.counts.total) {
+    throw "rule semantic status total mismatch: expected $($ruleRegistry.counts.total), got $($ruleSemanticStatus.summary.total)"
+  }
+  if ($ruleSemanticStatus.summary.ok -ne $ruleRegistry.counts.total -or $ruleSemanticStatus.summary.failed -ne 0 -or $ruleSemanticStatus.summary.stale -ne 0) {
+    throw "rule semantic status is not complete and fresh: ok=$($ruleSemanticStatus.summary.ok) stale=$($ruleSemanticStatus.summary.stale) failed=$($ruleSemanticStatus.summary.failed)"
+  }
+  if (-not $ruleSemanticStatus.registry -or -not $ruleSemanticStatus.registry.clients -or -not $ruleSemanticStatus.registry.logical_providers) {
+    throw 'rule semantic status is missing registry-derived counts'
+  }
+  if ($ruleSemanticStatus.registry.total -ne $ruleRegistry.counts.total -or
+      $ruleSemanticStatus.registry.disabled -ne $ruleRegistry.counts.disabled -or
+      $ruleSemanticStatus.registry.clients.shadowrocket -ne $ruleRegistry.counts.shadowrocket -or
+      $ruleSemanticStatus.registry.clients.mihomo -ne $ruleRegistry.counts.mihomo -or
+      $ruleSemanticStatus.registry.logical_providers.shadowrocket -ne $ruleRegistry.counts.shadowrocket_logical -or
+      $ruleSemanticStatus.registry.logical_providers.mihomo -ne $ruleRegistry.counts.mihomo_logical) {
+    throw 'rule semantic status registry-derived counts do not match the active registry'
+  }
+  $semanticById = @{}
+  foreach ($statusItem in @($ruleSemanticStatus.items)) { $semanticById[$statusItem.id] = $statusItem }
+  if (@($ruleSemanticStatus.items).Count -ne $ruleRegistry.counts.total -or $semanticById.Count -ne $ruleRegistry.counts.total) {
+    throw 'rule semantic status item count or id uniqueness does not match the active registry'
+  }
+  foreach ($registryItem in @($ruleRegistry.items)) {
+    if (-not $semanticById.ContainsKey($registryItem.id)) { throw "rule semantic status missing registry item: $($registryItem.id)" }
+    $statusItem = $semanticById[$registryItem.id]
+    if ($statusItem.status -ne 'ok') {
+      throw "registry item status is not ok: $($registryItem.id)"
+    }
+    if ($registryItem.logical_provider -and $statusItem.semantic.status -ne 'passed') {
+      throw "logical provider semantic gate not passed: $($registryItem.id)"
+    }
+    if ($registryItem.logical_provider -and $statusItem.logical_provider -ne $registryItem.logical_provider) {
+      throw "logical provider status identity mismatch: $($registryItem.id)"
+    }
+  }
+  Write-Ok ("rule semantic status passed: total={0} logical={1}" -f $ruleSemanticStatus.summary.total, @($ruleRegistry.items | Where-Object { $_.logical_provider }).Count)
+} finally {
+  Remove-Item -LiteralPath $ruleStatusTmp.FullName -ErrorAction SilentlyContinue
+}
+
 $checks = @(
   @('sparkle', $SparklePath),
   @('shadowrocket-config', $ShadowrocketConfigPath),
@@ -372,7 +466,7 @@ $ruleHashes = New-Object System.Collections.Generic.List[string]
 foreach ($item in $ruleRegistry.items) {
   $tmp = New-TemporaryFile
   try {
-    $rulePath = '/rules/' + $item.file
+    $rulePath = $ruleRegistry.rules_path_prefix.TrimEnd('/') + '/' + $item.file
     $ruleOut = if ($RemoteCheckHost) { "/tmp/subscription-hub-rule-$($item.id)" } else { $tmp.FullName }
     $code = Invoke-HubCurl -Path $rulePath -OutputPath $ruleOut
     if ($LASTEXITCODE -ne 0) { throw "curl failed for rule mirror $($item.id)" }

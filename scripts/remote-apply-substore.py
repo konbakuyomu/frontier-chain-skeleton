@@ -2,8 +2,8 @@
 """
 Apply frontier-chain-skeleton source files to a live Sub-Store data file.
 
-This script is intended to run on the VPS. It updates non-secret Script
-Operator content, can add one residential upstream subscription from stdin, and
+This script is intended to run on the VPS. It updates non-secret process
+operator content, can add one residential upstream subscription from stdin, and
 preserves existing tokens plus unrelated upstream subscription URLs. Client
 facing iOS collections are preserved by default so a target Sub-Store can own
 its upstream pool without hardcoded supplier names.
@@ -477,7 +477,7 @@ def resolve_ios_airports_subscriptions(data, source_collection_name, explicit_na
 def script_ops(item):
     return [
         op for op in item.get("process", []) or []
-        if isinstance(op, dict) and op.get("type") == "Script Operator"
+        if isinstance(op, dict) and op.get("type") == SCRIPT_OPERATOR_TYPE
     ]
 
 
@@ -486,7 +486,6 @@ def mihomo_process_ops(item):
         op for op in item.get("process", []) or []
         if isinstance(op, dict) and op.get("type") in {SCRIPT_OPERATOR_TYPE, RESPONSE_TRANSFORMER_TYPE}
     ]
-
 
 
 def mihomo_main_process_op(file_item, file_name):
@@ -502,16 +501,26 @@ def mihomo_main_process_op(file_item, file_name):
     return matches[0]
 
 
-
 def set_script_content(op, content, custom_name):
+    changed = False
     args = op.setdefault("args", {})
     old = args.get("content") or ""
-    args["mode"] = "script"
+    if args.get("mode") != "script":
+        args["mode"] = "script"
+        changed = True
     args["content"] = content
-    args.setdefault("arguments", {})
-    op["customName"] = custom_name
-    op["disabled"] = False
-    return old != content
+    if not isinstance(args.get("arguments"), dict):
+        args["arguments"] = {}
+        changed = True
+    else:
+        args.setdefault("arguments", {})
+    if op.get("customName") != custom_name:
+        op["customName"] = custom_name
+        changed = True
+    if op.get("disabled") is not False:
+        op["disabled"] = False
+        changed = True
+    return changed or old != content
 
 
 def clear_obsolete_residential_args(op):
@@ -574,13 +583,15 @@ def set_mihomo_extra_ai_api_hosts(data, file_name, hosts):
     return [file_name]
 
 
-
 def update_mihomo_main(data, file_name, content):
     file_item = find_named(data.get("files", []), file_name)
     if not file_item:
         raise RuntimeError("missing file: " + file_name)
     op = mihomo_main_process_op(file_item, file_name)
     changed = set_script_content(op, content, MIHOMO_MAIN_OPERATOR_NAME)
+    if op.get("type") != RESPONSE_TRANSFORMER_TYPE:
+        op["type"] = RESPONSE_TRANSFORMER_TYPE
+        changed = True
     changed = clear_obsolete_residential_args(op) or changed
     if file_item.get("content") != DEFAULT_MIHOMO_CONTENT_PLACEHOLDER:
         file_item["content"] = DEFAULT_MIHOMO_CONTENT_PLACEHOLDER
@@ -1289,6 +1300,7 @@ def main():
     parser.add_argument("--source-marker")
     parser.add_argument("--nodes-injector")
     parser.add_argument("--mihomo-main")
+    parser.add_argument("--extra-ai-api-hosts-file")
     parser.add_argument("--powerfullz-updater")
     parser.add_argument("--aggregator-url-stdin", action="store_true")
     parser.add_argument("--aggregator-name", default=DEFAULT_AGGREGATOR_NAME)
@@ -1408,12 +1420,19 @@ def main():
             "sha256": short_hash(content),
         })
 
-    ios_names = ensure_ios_shadowrocket_collections(
-        data,
-        args.collection,
-        split_names(args.ios_airports_subscriptions),
-        split_names(args.ios_hy2_subscriptions),
-    )
+    sync_ios_collections = any([
+        args.nodes_injector,
+        args.ios_airports_subscriptions,
+        args.ios_hy2_subscriptions,
+    ])
+    ios_names = []
+    if sync_ios_collections:
+        ios_names = ensure_ios_shadowrocket_collections(
+            data,
+            args.collection,
+            split_names(args.ios_airports_subscriptions),
+            split_names(args.ios_hy2_subscriptions),
+        )
     changes.append({
         "target": "ios-shadowrocket-collections",
         "changed": ios_names,
@@ -1429,7 +1448,37 @@ def main():
             "sha256": short_hash(content),
         })
 
-    taxonomy_changes = apply_display_taxonomy(data)
+    if args.extra_ai_api_hosts_file:
+        raw_hosts = read_text(args.extra_ai_api_hosts_file)
+        hosts = []
+        try:
+            parsed = json.loads(raw_hosts)
+            if isinstance(parsed, list):
+                hosts = [str(item) for item in parsed]
+            elif isinstance(parsed, str):
+                hosts = [parsed]
+        except json.JSONDecodeError:
+            hosts = [line.strip() for line in raw_hosts.splitlines() if line.strip() and not line.strip().startswith("#")]
+        names = set_mihomo_extra_ai_api_hosts(data, args.file, hosts)
+        changes.append({
+            "target": "mihomo-extra-ai-api-hosts",
+            "changed": names,
+            "count": len(hosts),
+        })
+
+    sync_display_taxonomy = any([
+        args.source_marker,
+        args.nodes_injector,
+        args.aggregator_url_stdin,
+        args.link_existing_three_x,
+        args.ensure_existing_edge_us_v2,
+        args.clone_edge_us_v2_att_from,
+        args.edge_us_v2_vmess_bundle,
+        args.edge_us_v2_hy2_bundle,
+        args.link_existing_edge_us_v2,
+        args.unlink_legacy_self_nodes,
+    ])
+    taxonomy_changes = apply_display_taxonomy(data) if sync_display_taxonomy else []
     changes.append({
         "target": "display-taxonomy",
         "changed": taxonomy_changes,

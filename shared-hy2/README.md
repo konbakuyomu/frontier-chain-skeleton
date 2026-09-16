@@ -16,7 +16,7 @@ shared-users.tsv
   -> generate.py
   -> .secrets.local/out/compose.yaml
   -> .secrets.local/out/config/u01/hysteria.yaml
-  -> .secrets.local/out/links/u01.{hysteria-client.yaml,mihomo.yaml,uri.txt}
+  -> .secrets.local/out/links/u01/
   -> /opt/shared-hy2 on the VPS
 ```
 
@@ -116,6 +116,17 @@ shared-hy2/.secrets.local/out/links/<user>/
 ```
 
 Do not paste those files into Git, Obsidian, or chat.
+
+Generated client files:
+
+| file | use |
+|---|---|
+| `mihomo-profile.yaml` | Complete one-file Mihomo profile for Clash Verge, Sparkle, FlClash, and OpenClash. Prefer this for non-technical users on Mihomo clients. |
+| `mihomo.yaml` | Mihomo proxy snippet only. Use only when merging into an existing profile or Sub-Store collection. Do not import it as a full client profile. |
+| `sing-box-v2rayn.json` | v2rayN custom sing-box config with a local mixed proxy on `127.0.0.1:10808`, matching v2rayN's default local mixed port. Import it as a custom configuration and set Core type to `sing_box`. |
+| `sing-box-client.json` | Standalone sing-box client config with a local mixed proxy on `127.0.0.1:1080`. |
+| `hysteria-client.yaml` | Native Hysteria2 client config with a local SOCKS5 proxy on `127.0.0.1:1080`. |
+| `uri.txt` | Single Hysteria2 share URI for clients that correctly support `hysteria2://` imports. |
 
 ## Auto-upgrade
 

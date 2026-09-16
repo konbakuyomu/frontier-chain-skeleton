@@ -1,0 +1,95 @@
+schema: comet.native.v4
+name: claude-coverage-gaps
+language: zh-CN
+phase: build
+status: active
+state_version: 3
+brief: brief.md
+shape_confirmation_hash: 72e68fd9ad35cc15a71d2954928edbbe4fcc635c431ab5df69491ac7dc0307f5
+spec_changes:
+  - capability: ai-routing-coverage
+    operation: create
+    source: specs/ai-routing-coverage/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: building
+  goal_cycle: 1
+  iteration: 1
+  attempt: 0
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: submit-builder-candidate
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "`main.js` 的 AI 生成块包含 `DOMAIN-SUFFIX,claudemcpclient.com` 与
+      `DOMAIN-SUFFIX,claudemcpcontent.com`，两条均指向 AI 组。"
+    result: pending
+    reason: null
+  - id: A2
+    source: brief.md
+    text: "`shadowrocket.conf` 的 AI 生成块包含同样两条域名，均指向 `🤖 AI 服务`，且与 `main.js` 的 Claude
+      规则集逐条一致。"
+    result: pending
+    reason: null
+  - id: A3
+    source: brief.md
+    text: "`ai-routing-contract.json` 的 `services.anthropic.conditional` 覆盖官方
+      Network access requirements 列出的全部首方域名；`rules.json` 中两个 anthropic 逻辑项的
+      `semantic_required` 各含 8 项，且每项都来自契约的 `required` 或 `conditional`。"
+    result: pending
+    reason: null
+  - id: A4
+    source: brief.md
+    text: "`render-ai-routing.py --check`、`rule_mirror.py --check`、`pytest
+      test_ai_routing.py` 全部通过，退出码为 0。"
+    result: pending
+    reason: null
+  - id: A5
+    source: brief.md
+    text: 在私有临时目录执行真实 sync，结果为 `ok=total`、`stale=0`、`failed=0`。
+    result: pending
+    reason: null
+  - id: A6
+    source: brief.md
+    text: 上游源缺少 `claude.com` 时，`semantic_required` 哨兵报缺项拦截，不因变化幅度落在 `removed_limit`
+      内而放行。
+    result: pending
+    reason: null
+  - id: A7
+    source: brief.md
+    text: 部署到 SJC 后，生产 `rules/status.json` 为
+      `ok=total`、`stale=0`、`failed=0`，且镜像文件包含新增的两条域名。
+    result: pending
+    reason: null
+  - id: A8
+    source: brief.md
+    text: 本地 Sparkle override 文件 `19d8b14dfd4.js` 已按 `main.js` 重新生成，生成前存在
+      `.bak-<timestamp>` 备份。
+    result: pending
+    reason: null
+builder_handoff: null
+blockers: []
+verification: null
+history: []
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pending
+verification_report: null
+archived: false
+created_at: 2026-09-16T13:35:07.999Z

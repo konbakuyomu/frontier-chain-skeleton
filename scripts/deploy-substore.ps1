@@ -36,7 +36,7 @@ param(
   [string]$SubStoreDir = '/opt/1panel/apps/sub-store/sub-store',
   [string]$SubStoreDataPath = '',
   [string]$SubStoreBackupDir = '',
-  [string]$ContainerName = 'sub-store',
+  [string]$ContainerName = 'frontier-sub-store',
   [string]$CollectionName = 'merged-airports',
   [string]$MihomoFileName = 'frontier-chain-mihomo',
   [string]$ResidentialAggregatorUrl = $env:FRONTIER_RESIDENTIAL_AGGREGATOR_URL,
@@ -53,7 +53,10 @@ param(
   [string]$IosAirportsSubscriptions = $env:FRONTIER_IOS_AIRPORTS_SUBSCRIPTIONS,
   [string]$IosHy2Subscriptions = $env:FRONTIER_IOS_HY2_SUBSCRIPTIONS,
   [switch]$NoBackup,
-  [switch]$NoRestart
+  [switch]$NoRestart,
+
+  [ValidateRange(30, 1800)]
+  [int]$RemoteDeadlineSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,7 +111,15 @@ function Get-SshArgs {
   $args = @()
   if ($SshKey) { $args += @('-i', $SshKey) }
   if ($SshPort) { $args += @('-p', $SshPort) }
-  $args += @('-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', "$SshUser@$SshHost")
+  $args += @(
+    '-o', 'BatchMode=yes',
+    '-o', 'ConnectTimeout=10',
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'ServerAliveInterval=15',
+    '-o', 'ServerAliveCountMax=2',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    "$SshUser@$SshHost"
+  )
   return $args
 }
 
@@ -116,12 +127,170 @@ function Get-ScpArgs {
   $args = @()
   if ($SshKey) { $args += @('-i', $SshKey) }
   if ($SshPort) { $args += @('-P', $SshPort) }
-  $args += @('-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new')
+  $args += @(
+    '-o', 'BatchMode=yes',
+    '-o', 'ConnectTimeout=10',
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'ServerAliveInterval=15',
+    '-o', 'ServerAliveCountMax=2',
+    '-o', 'StrictHostKeyChecking=accept-new'
+  )
   return $args
 }
 
 function Quote-Remote($Text) {
   return "'" + $Text.Replace("'", "'\''") + "'"
+}
+
+function Invoke-BoundedSubStoreRemote {
+  param(
+    [Parameter(Mandatory = $true)][string[]]$SshArgs,
+    [Parameter(Mandatory = $true)][string]$Body,
+    [Parameter(Mandatory = $true)][string]$RemoteStage,
+    [Parameter(Mandatory = $true)][string]$ArchivePath,
+    [Parameter(Mandatory = $true)][string]$RunId,
+    [Parameter(Mandatory = $true)][int]$DeadlineSeconds,
+    [string]$SecretInputPath = ''
+  )
+
+  $resultPath = "$RemoteStage/result.env"
+  $payloadPath = "$RemoteStage/payload"
+  $windowName = "substore-$($RunId.Replace('-', ''))"
+  $template = @'
+#!/usr/bin/env bash
+set -eu
+RESULT_PATH=__RESULT_PATH__
+PAYLOAD_PATH=__PAYLOAD_PATH__
+ARCHIVE_PATH=__ARCHIVE_PATH__
+SECRET_INPUT_PATH=__SECRET_INPUT_PATH__
+
+finish() {
+  rc=$?
+  set +e
+  trap - EXIT TERM INT HUP
+  cleanup=1
+  if [ -n "$SECRET_INPUT_PATH" ] && [ -e "$SECRET_INPUT_PATH" ]; then
+    rm -f "$SECRET_INPUT_PATH"
+    if [ -e "$SECRET_INPUT_PATH" ]; then
+      cleanup=0
+    fi
+  fi
+  result=failed
+  gate=blocked
+  if [ "$rc" -eq 0 ]; then
+    mkdir -p "$(dirname "$ARCHIVE_PATH")"
+    if ! mv "$PAYLOAD_PATH" "$ARCHIVE_PATH"; then
+      rc=21
+      cleanup=0
+    else
+      result=complete
+      gate=pass
+    fi
+  elif [ "$rc" -eq 124 ]; then
+    result=timeout
+    cleanup=0
+  else
+    cleanup=0
+  fi
+  result_tmp="${RESULT_PATH}.tmp"
+  printf 'SUBSTORE_DEPLOY_STARTED=1\nSUBSTORE_DEPLOY_EXIT=%s\nSUBSTORE_DEPLOY_RESULT=%s\nSUBSTORE_DEPLOY_GATE=%s\nSUBSTORE_DEPLOY_CLEANUP=%s\n' \
+    "$rc" "$result" "$gate" "$cleanup" > "$result_tmp"
+  mv "$result_tmp" "$RESULT_PATH"
+  exit "$rc"
+}
+
+trap finish EXIT
+trap 'exit 124' TERM
+trap 'exit 130' INT HUP
+printf 'SUBSTORE_DEPLOY_STARTED=1\n' > "$RESULT_PATH"
+
+__BODY__
+'@
+  $script = $template.Replace('__RESULT_PATH__', (Quote-Remote $resultPath)).Replace('__PAYLOAD_PATH__', (Quote-Remote $payloadPath)).Replace('__ARCHIVE_PATH__', (Quote-Remote $ArchivePath)).Replace('__SECRET_INPUT_PATH__', (Quote-Remote $SecretInputPath)).Replace('__BODY__', $Body)
+  $script = $script -replace "`r`n", "`n"
+  $script = $script -replace "`r", "`n"
+  $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($script))
+  $launchTemplate = @'
+set -eu
+WINDOW_NAME=__WINDOW_NAME__
+DEADLINE_SECONDS=__DEADLINE_SECONDS__
+SCRIPT_B64=__SCRIPT_B64__
+tmux has-session -t ai 2>/dev/null || tmux new-session -d -s ai
+window_count=$(tmux list-windows -t ai -F '#{window_name}' | awk -v target="$WINDOW_NAME" '$0 == target { count++ } END { print count + 0 }')
+printf 'SUBSTORE_DEPLOY_WINDOW_PRE=%s\n' "$window_count"
+[ "$window_count" -eq 0 ]
+tmux new-window -d -t ai -n "$WINDOW_NAME" "printf '%s' '$SCRIPT_B64' | base64 -d | timeout --foreground $DEADLINE_SECONDS bash -s >/dev/null 2>&1"
+'@
+  $launch = $launchTemplate.Replace('__WINDOW_NAME__', $windowName).Replace('__DEADLINE_SECONDS__', [string]$DeadlineSeconds).Replace('__SCRIPT_B64__', $encoded)
+  $launch = $launch -replace "`r`n", "`n"
+  $launch = $launch -replace "`r", "`n"
+  $launchOutput = @(& ssh @SshArgs $launch)
+  if ($LASTEXITCODE -ne 0 -or ($launchOutput -notcontains 'SUBSTORE_DEPLOY_WINDOW_PRE=0')) {
+    throw 'remote Sub-Store tmux launch failed or the run window already exists'
+  }
+
+  $terminal = $null
+  $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $localDeadlineSeconds = $DeadlineSeconds + 45
+  while ($stopwatch.Elapsed.TotalSeconds -lt $localDeadlineSeconds) {
+    $pollCommand = "if [ -s $(Quote-Remote $resultPath) ]; then cat $(Quote-Remote $resultPath); fi"
+    $lines = @(& ssh @SshArgs $pollCommand)
+    if ($LASTEXITCODE -ne 0) { throw 'remote Sub-Store result poll failed' }
+    if ($lines -contains 'SUBSTORE_DEPLOY_RESULT=complete' -or $lines -contains 'SUBSTORE_DEPLOY_RESULT=failed' -or $lines -contains 'SUBSTORE_DEPLOY_RESULT=timeout') {
+      $terminal = $lines
+      break
+    }
+    Start-Sleep -Seconds 2
+  }
+  if (-not $terminal) {
+    throw "remote Sub-Store deployment did not emit terminal markers within $localDeadlineSeconds seconds; stage preserved for inspection"
+  }
+
+  $markers = @{}
+  foreach ($line in $terminal) {
+    if ($line -match '^(SUBSTORE_DEPLOY_[A-Z_]+)=([A-Za-z0-9_-]+)$') {
+      $markers[$Matches[1]] = $Matches[2]
+    }
+  }
+  foreach ($required in @('SUBSTORE_DEPLOY_STARTED', 'SUBSTORE_DEPLOY_EXIT', 'SUBSTORE_DEPLOY_RESULT', 'SUBSTORE_DEPLOY_GATE', 'SUBSTORE_DEPLOY_CLEANUP')) {
+    if (-not $markers.ContainsKey($required)) { throw "remote Sub-Store deployment marker missing: $required" }
+  }
+
+  $windowTemplate = @'
+set -eu
+WINDOW_NAME=__WINDOW_NAME__
+window_count=$(tmux list-windows -t ai -F '#{window_name}' | awk -v target="$WINDOW_NAME" '$0 == target { count++ } END { print count + 0 }')
+printf 'SUBSTORE_DEPLOY_WINDOW_POST=%s\n' "$window_count"
+'@
+  $windowCheck = $windowTemplate.Replace('__WINDOW_NAME__', $windowName)
+  $windowOutput = @()
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    $windowOutput = @(& ssh @SshArgs $windowCheck)
+    if ($LASTEXITCODE -ne 0) { throw 'remote Sub-Store window residue check failed' }
+    if ($windowOutput -contains 'SUBSTORE_DEPLOY_WINDOW_POST=0') { break }
+    Start-Sleep -Seconds 1
+  }
+  if ($windowOutput -notcontains 'SUBSTORE_DEPLOY_WINDOW_POST=0') {
+    throw 'remote Sub-Store window residue is non-zero; no cleanup was attempted'
+  }
+
+  foreach ($key in @('SUBSTORE_DEPLOY_STARTED', 'SUBSTORE_DEPLOY_EXIT', 'SUBSTORE_DEPLOY_RESULT', 'SUBSTORE_DEPLOY_GATE', 'SUBSTORE_DEPLOY_CLEANUP')) {
+    Write-Host "$key=$($markers[$key])"
+  }
+  Write-Host 'SUBSTORE_DEPLOY_WINDOW_POST=0'
+
+  $passed = $markers['SUBSTORE_DEPLOY_EXIT'] -eq '0' -and $markers['SUBSTORE_DEPLOY_RESULT'] -eq 'complete' -and $markers['SUBSTORE_DEPLOY_GATE'] -eq 'pass' -and $markers['SUBSTORE_DEPLOY_CLEANUP'] -eq '1'
+  if (-not $passed) {
+    throw 'remote Sub-Store deployment completed with a blocked terminal result; stage preserved for inspection'
+  }
+
+  & ssh @SshArgs ("rm -f " + (Quote-Remote $resultPath)) | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'remote Sub-Store result cleanup failed' }
+  $stageCheck = @(& ssh @SshArgs ("rmdir " + (Quote-Remote $RemoteStage) + " 2>/dev/null || true; if [ -e " + (Quote-Remote $RemoteStage) + " ]; then echo SUBSTORE_DEPLOY_STAGE_RESIDUE=1; else echo SUBSTORE_DEPLOY_STAGE_RESIDUE=0; fi"))
+  if ($LASTEXITCODE -ne 0 -or ($stageCheck -notcontains 'SUBSTORE_DEPLOY_STAGE_RESIDUE=0')) {
+    throw 'remote Sub-Store stage residue is non-zero; no recursive cleanup was attempted'
+  }
+  Write-Host 'SUBSTORE_DEPLOY_STAGE_RESIDUE=0'
 }
 
 $selected = Get-SelectedTargets
@@ -206,64 +375,64 @@ if (-not $SshHost) {
 
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $remoteStage = "/tmp/frontier-substore-deploy-$runId"
+$remotePayload = "$remoteStage/payload"
 $sshArgs = Get-SshArgs
 $scpArgs = Get-ScpArgs
 
 Write-Info "creating remote staging: $remoteStage"
-& ssh @sshArgs ("mkdir -p " + (Quote-Remote $remoteStage))
+& ssh @sshArgs ("mkdir -p " + (Quote-Remote $remotePayload))
 if ($LASTEXITCODE -ne 0) { throw 'ssh mkdir failed' }
 
-try {
-  $uploadMap = @{
-    'remote-apply'       = 'remote-apply-substore.py'
-    'source-marker'      = 'substore-source-marker.js'
-    'nodes'              = 'shadowrocket-nodes-injector.js'
-    'mihomo'             = 'main.js'
-    'powerfullz-updater' = 'update-powerfullz-inline.py'
-  }
+$uploadMap = @{
+  'remote-apply'       = 'remote-apply-substore.py'
+  'source-marker'      = 'substore-source-marker.js'
+  'nodes'              = 'shadowrocket-nodes-injector.js'
+  'mihomo'             = 'main.js'
+  'powerfullz-updater' = 'update-powerfullz-inline.py'
+}
 
-  $uploadKeys = @('remote-apply') + $selected
-  foreach ($key in $uploadKeys) {
-    $remotePath = "${SshUser}@${SshHost}:$remoteStage/$($uploadMap[$key])"
-    Write-Info "uploading $key"
-    & scp @scpArgs $Files[$key] $remotePath
-    if ($LASTEXITCODE -ne 0) { throw "scp failed: $key" }
-  }
+$uploadKeys = @('remote-apply') + $selected
+foreach ($key in $uploadKeys) {
+  $remotePath = "${SshUser}@${SshHost}:$remotePayload/$($uploadMap[$key])"
+  Write-Info "uploading $key"
+  & scp @scpArgs $Files[$key] $remotePath
+  if ($LASTEXITCODE -ne 0) { throw "scp failed: $key" }
+}
 
-  $remoteEdgeUsV2VmessBundle = ''
-  $remoteEdgeUsV2Hy2Bundle = ''
-  if ($EdgeUsV2VmessBundle -and $EdgeUsV2Hy2Bundle) {
-    $remoteEdgeUsV2VmessBundle = "$remoteStage/edge-us-v2-vmess-bundle.txt"
-    $remoteEdgeUsV2Hy2Bundle = "$remoteStage/edge-us-v2-hy2-bundle.txt"
-    Write-Info 'uploading edge-us-v2 bundles'
-    & scp @scpArgs $EdgeUsV2VmessBundle "${SshUser}@${SshHost}:$remoteEdgeUsV2VmessBundle"
-    if ($LASTEXITCODE -ne 0) { throw 'scp failed: edge-us-v2 vmess bundle' }
-    & scp @scpArgs $EdgeUsV2Hy2Bundle "${SshUser}@${SshHost}:$remoteEdgeUsV2Hy2Bundle"
-    if ($LASTEXITCODE -ne 0) { throw 'scp failed: edge-us-v2 hy2 bundle' }
-  }
+$remoteEdgeUsV2VmessBundle = ''
+$remoteEdgeUsV2Hy2Bundle = ''
+if ($EdgeUsV2VmessBundle -and $EdgeUsV2Hy2Bundle) {
+  $remoteEdgeUsV2VmessBundle = "$remotePayload/edge-us-v2-vmess-bundle.txt"
+  $remoteEdgeUsV2Hy2Bundle = "$remotePayload/edge-us-v2-hy2-bundle.txt"
+  Write-Info 'uploading edge-us-v2 bundles'
+  & scp @scpArgs $EdgeUsV2VmessBundle "${SshUser}@${SshHost}:$remoteEdgeUsV2VmessBundle"
+  if ($LASTEXITCODE -ne 0) { throw 'scp failed: edge-us-v2 vmess bundle' }
+  & scp @scpArgs $EdgeUsV2Hy2Bundle "${SshUser}@${SshHost}:$remoteEdgeUsV2Hy2Bundle"
+  if ($LASTEXITCODE -ne 0) { throw 'scp failed: edge-us-v2 hy2 bundle' }
+}
 
-  $cmd = @(
-    'python3',
-    (Quote-Remote "$remoteStage/remote-apply-substore.py"),
-    '--app-dir', (Quote-Remote $SubStoreDir),
-    '--data', (Quote-Remote $SubStoreDataPath),
-    '--backup-dir', (Quote-Remote $SubStoreBackupDir),
-    '--container', (Quote-Remote $ContainerName),
-    '--collection', (Quote-Remote $CollectionName),
-    '--file', (Quote-Remote $MihomoFileName)
-  )
+$cmd = @(
+  'python3',
+  (Quote-Remote "$remotePayload/remote-apply-substore.py"),
+  '--app-dir', (Quote-Remote $SubStoreDir),
+  '--data', (Quote-Remote $SubStoreDataPath),
+  '--backup-dir', (Quote-Remote $SubStoreBackupDir),
+  '--container', (Quote-Remote $ContainerName),
+  '--collection', (Quote-Remote $CollectionName),
+  '--file', (Quote-Remote $MihomoFileName)
+)
 
   if ($selected -contains 'source-marker') {
-    $cmd += @('--source-marker', (Quote-Remote "$remoteStage/substore-source-marker.js"))
+    $cmd += @('--source-marker', (Quote-Remote "$remotePayload/substore-source-marker.js"))
   }
   if ($selected -contains 'nodes') {
-    $cmd += @('--nodes-injector', (Quote-Remote "$remoteStage/shadowrocket-nodes-injector.js"))
+    $cmd += @('--nodes-injector', (Quote-Remote "$remotePayload/shadowrocket-nodes-injector.js"))
   }
   if ($selected -contains 'mihomo') {
-    $cmd += @('--mihomo-main', (Quote-Remote "$remoteStage/main.js"))
+    $cmd += @('--mihomo-main', (Quote-Remote "$remotePayload/main.js"))
   }
   if ($selected -contains 'powerfullz-updater') {
-    $cmd += @('--powerfullz-updater', (Quote-Remote "$remoteStage/update-powerfullz-inline.py"))
+    $cmd += @('--powerfullz-updater', (Quote-Remote "$remotePayload/update-powerfullz-inline.py"))
   }
   if ($ResidentialAggregatorUrl) {
     $cmd += @(
@@ -303,25 +472,21 @@ try {
   if ($NoBackup) { $cmd += '--no-backup' }
   if ($NoRestart) { $cmd += '--no-restart' }
 
-  Write-Info 'applying remote patch'
-  if ($ResidentialAggregatorUrl) {
-    $ResidentialAggregatorUrl | & ssh @sshArgs ($cmd -join ' ')
-  } else {
-    & ssh @sshArgs ($cmd -join ' ')
+Write-Info 'applying remote patch inside bounded tmux'
+$secretInputPath = ''
+$remoteBody = $cmd -join ' '
+if ($ResidentialAggregatorUrl) {
+  $secretInputPath = "$remotePayload/aggregator-url.txt"
+  $localSecret = New-TemporaryFile
+  try {
+    [System.IO.File]::WriteAllText($localSecret.FullName, $ResidentialAggregatorUrl + "`n", (New-Object System.Text.UTF8Encoding($false)))
+    & scp @scpArgs $localSecret.FullName "${SshUser}@${SshHost}:$secretInputPath"
+    if ($LASTEXITCODE -ne 0) { throw 'scp failed: residential aggregator input' }
+  } finally {
+    Remove-Item -LiteralPath $localSecret.FullName -ErrorAction SilentlyContinue
   }
-  if ($LASTEXITCODE -ne 0) { throw 'remote apply failed' }
-  Write-Ok 'Sub-Store deploy finished'
-} finally {
-  Write-Info 'cleaning remote staging'
-  $cleanupCmd = @(
-    'rm -f ' + (Quote-Remote "$remoteStage/remote-apply-substore.py"),
-    'rm -f ' + (Quote-Remote "$remoteStage/substore-source-marker.js"),
-    'rm -f ' + (Quote-Remote "$remoteStage/shadowrocket-nodes-injector.js"),
-    'rm -f ' + (Quote-Remote "$remoteStage/main.js"),
-    'rm -f ' + (Quote-Remote "$remoteStage/update-powerfullz-inline.py"),
-    'rm -f ' + (Quote-Remote "$remoteStage/edge-us-v2-vmess-bundle.txt"),
-    'rm -f ' + (Quote-Remote "$remoteStage/edge-us-v2-hy2-bundle.txt"),
-    'rmdir ' + (Quote-Remote $remoteStage) + ' 2>/dev/null || true'
-  ) -join ' && '
-  & ssh @sshArgs $cleanupCmd | Out-Null
+  $remoteBody += " < " + (Quote-Remote $secretInputPath)
 }
+$archivePath = "$SubStoreBackupDir/deploy-payload-$runId"
+Invoke-BoundedSubStoreRemote -SshArgs $sshArgs -Body $remoteBody -RemoteStage $remoteStage -ArchivePath $archivePath -RunId $runId -DeadlineSeconds $RemoteDeadlineSeconds -SecretInputPath $secretInputPath
+Write-Ok 'Sub-Store deploy finished'

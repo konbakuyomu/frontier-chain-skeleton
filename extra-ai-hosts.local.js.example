@@ -1,0 +1,9 @@
+/**
+ * Optional private AI API hosts (for example ANTHROPIC_BASE_URL gateways).
+ * Copy to extra-ai-hosts.local.js and keep it out of git.
+ * Sparkle: load this override before frontier-chain main.js.
+ * Sub-Store: set Script Operator argument extra_ai_api_hosts instead.
+ */
+globalThis.__frontierExtraAiApiHosts = [
+  // "api.example-gateway.example"
+];

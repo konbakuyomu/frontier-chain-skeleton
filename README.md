@@ -41,6 +41,7 @@ Sub-Store 后台只把显示名改成小白可读的分层；内部 `name`、sha
 - Shadowrocket 端保留双订阅模型，用 `select + policy-regex-filter` 动态列出家宽候选。
 - AI / PayPal / Google 等业务组只追加 `🏡 家宽选择`；区域家宽组只在 `🏡 家宽选择` 内部展示。
 - 家宽供应商只作为后台原料，客户端菜单稳定为 `🏡 家宽选择` / `🏡 美国家宽` / `🏡 亚太家宽` 等角色。
+- Claude / Anthropic 官方域以内联 `DOMAIN-SUFFIX,anthropic.com` 加 `claude.ai` / `claude.com` / `claudeusercontent.com` 走 `AI服务`，不依赖 RULE-SET 镜像是否拉取成功。Vertex 的 `claude.googleapis.com` 也走 `AI服务`。`ANTHROPIC_BASE_URL` 私有中转不得进 Git；用 Sub-Store 参数 `extra_ai_api_hosts` 或 gitignore 的 `extra-ai-hosts.local.js`。
 
 ## 敏感信息边界
 

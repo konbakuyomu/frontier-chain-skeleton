@@ -56,10 +56,15 @@ $ShadowrocketConfig = Join-Path $RepoRoot 'shadowrocket.conf'
 $PyFiles = @(
   (Join-Path $PSScriptRoot 'remote-verify-substore.py'),
   (Join-Path $PSScriptRoot 'remote-apply-substore.py'),
-  (Join-Path $PSScriptRoot 'update-powerfullz-inline.py')
+  (Join-Path $PSScriptRoot 'update-powerfullz-inline.py'),
+  (Join-Path $RepoRoot 'subscription-hub\ai_routing.py'),
+  (Join-Path $RepoRoot 'subscription-hub\rule_mirror.py'),
+  (Join-Path $RepoRoot 'subscription-hub\render.py'),
+  (Join-Path $PSScriptRoot 'render-ai-routing.py')
 )
 $NodeCheckScripts = @(
-  (Join-Path $PSScriptRoot 'check-3x-injector.js')
+  (Join-Path $PSScriptRoot 'check-3x-injector.js'),
+  (Join-Path $PSScriptRoot 'check-ai-routing.js')
 )
 
 function Write-Info($Message) { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
@@ -109,6 +114,13 @@ if ($py) {
   & python -B -c "import pathlib,sys; [compile(pathlib.Path(p).read_text(encoding='utf-8'), p, 'exec') for p in sys.argv[1:]]" @PyFiles
   if ($LASTEXITCODE -ne 0) { throw 'python syntax check failed' }
   Write-Ok 'python syntax checks passed'
+  & python (Join-Path $RepoRoot 'subscription-hub\rule_mirror.py') --check --registry (Join-Path $RepoRoot 'subscription-hub\rules.json') --contract (Join-Path $RepoRoot 'ai-routing-contract.json')
+  if ($LASTEXITCODE -ne 0) { throw 'AI rule registry contract check failed' }
+  & python (Join-Path $PSScriptRoot 'render-ai-routing.py') --check
+  if ($LASTEXITCODE -ne 0) { throw 'AI routing renderer drift check failed' }
+  & python -B -m unittest discover -s (Join-Path $RepoRoot 'subscription-hub\tests') -p 'test_ai_routing.py'
+  if ($LASTEXITCODE -ne 0) { throw 'AI routing regression tests failed' }
+  Write-Ok 'AI routing contract, generated blocks, and regression tests passed'
 } else {
   Write-Warn2 'python not found locally, skipped Python syntax checks'
 }
@@ -130,7 +142,16 @@ if ($srText -notmatch 'AI \u670d\u52a1[^\r\n]*policy-select-name=.*\u5bb6\u5bbd\
   throw 'shadowrocket.conf AI/PayPal groups must default to the stable residential selector'
 }
 if ($srText -notmatch 'DOMAIN,cloudcode-pa\.googleapis\.com,' -or $srText -notmatch 'DOMAIN,cloudaicompanion\.googleapis\.com,') {
-  throw 'shadowrocket.conf missing inline Codex/Gemini AI extension rules'
+  throw 'shadowrocket.conf missing inline Gemini CLI compatibility rules'
+}
+foreach ($sentinel in @('DOMAIN,api\.openai\.com,', 'DOMAIN,api\.anthropic\.com,', 'DOMAIN,api\.x\.ai,', 'DOMAIN,grok\.x\.com,')) {
+  if ($srText -notmatch $sentinel) { throw "shadowrocket.conf missing AI routing sentinel: $sentinel" }
+}
+if ($srText -match 'DOMAIN-SUFFIX,x\.com,🤖 AI 服务' -or $srText -match 'shadowrocket-ai\.list') {
+  throw 'shadowrocket.conf retains an unsafe broad X rule or legacy opaque AI mirror'
+}
+if ($srText -notmatch 'shadowrocket-advertising-domain\.list,🛑 广告拦截' -or $srText -notmatch 'shadowrocket-advertising\.list,🛑 广告拦截') {
+  throw 'shadowrocket.conf lost the non-AI advertising rule block while rendering AI rules'
 }
 Write-Ok 'shadowrocket.conf local checks passed'
 
@@ -156,6 +177,12 @@ try {
   $remoteScript = "${SshUser}@${SshHost}:$remoteStage/remote-verify-substore.py"
   & scp @scpArgs (Join-Path $PSScriptRoot 'remote-verify-substore.py') $remoteScript
   if ($LASTEXITCODE -ne 0) { throw 'scp verify script failed' }
+  $remoteAiContract = "${SshUser}@${SshHost}:$remoteStage/ai-routing-contract.json"
+  & scp @scpArgs (Join-Path $RepoRoot 'ai-routing-contract.json') $remoteAiContract
+  if ($LASTEXITCODE -ne 0) { throw 'scp AI routing contract failed' }
+  $remoteAiRegistry = "${SshUser}@${SshHost}:$remoteStage/ai-routing-rules.json"
+  & scp @scpArgs (Join-Path $RepoRoot 'subscription-hub\rules.json') $remoteAiRegistry
+  if ($LASTEXITCODE -ne 0) { throw 'scp AI routing registry failed' }
 
   $cmd = @(
     'python3',
@@ -169,7 +196,9 @@ try {
     '--ios-hy2-collection', (Quote-Remote $IosHy2Collection),
     '--local-base-url', (Quote-Remote $LocalBaseUrl),
     '--min-ios-ordinary-nodes', $MinIosOrdinaryNodes,
-    '--min-ios-hy2-nodes', $MinIosHy2Nodes
+    '--min-ios-hy2-nodes', $MinIosHy2Nodes,
+    '--ai-routing-contract', (Quote-Remote "$remoteStage/ai-routing-contract.json"),
+    '--ai-routing-registry', (Quote-Remote "$remoteStage/ai-routing-rules.json")
   )
   if ($ExpectedBackendPath) {
     $cmd += @('--expected-backend-path', (Quote-Remote $ExpectedBackendPath))
@@ -194,7 +223,7 @@ try {
   Write-Ok 'remote verification passed'
 } finally {
   $cleanupCmd = @(
-    'rm -f ' + (Quote-Remote "$remoteStage/remote-verify-substore.py"),
+    'rm -f ' + (Quote-Remote "$remoteStage/remote-verify-substore.py") + ' ' + (Quote-Remote "$remoteStage/ai-routing-contract.json") + ' ' + (Quote-Remote "$remoteStage/ai-routing-rules.json"),
     'rmdir ' + (Quote-Remote $remoteStage) + ' 2>/dev/null || true'
   ) -join ' && '
   & ssh @sshArgs $cleanupCmd | Out-Null

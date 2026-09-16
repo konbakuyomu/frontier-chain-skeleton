@@ -7,6 +7,7 @@ backend paths, subscription URLs, tokens, or proxy credentials.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,8 @@ EXCLUDE_INFO_PATTERN = re.compile(
 )
 FORBIDDEN_RUNTIME_TERMS = ["[VPS→家宽]", "[机场→家宽]", "🏠 [VPS→家宽]", "🏠 [机场→家宽]", "Frontier", "ScrapeGW"]
 OBSOLETE_ARG_PREFIXES = ("frontier_", "scrapegw_", "vps_")
+SCRIPT_OPERATOR_TYPE = "Script Operator"
+RESPONSE_TRANSFORMER_TYPE = "Response Transformer"
 DISPLAY_TAXONOMY_TAG = "frontier-display-v2"
 RESIDENTIAL_TEXT_MARKERS = (
     "residential",
@@ -41,6 +44,17 @@ RESIDENTIAL_TEXT_MARKERS = (
     "宽带",
     "att",
     "at&t",
+)
+REGION_RESIDENTIAL_GROUP_NAMES = (
+    "🏡 全球家宽",
+    "🏡 美国家宽",
+    "🏡 香港家宽",
+    "🏡 台湾家宽",
+    "🏡 日韩家宽",
+    "🏡 亚太家宽",
+    "🏡 欧洲家宽",
+    "🏡 美洲家宽",
+    "🏡 非洲家宽",
 )
 EXPECTED_DISPLAY_NAMES = {
     "subs": {
@@ -160,13 +174,27 @@ def find_named(items, name):
 def script_ops(item):
     return [
         op for op in item.get("process", []) or []
-        if isinstance(op, dict) and op.get("type") == "Script Operator"
+        if isinstance(op, dict) and op.get("type") == SCRIPT_OPERATOR_TYPE
+    ]
+
+
+def response_transformer_ops(item):
+    return [
+        op for op in item.get("process", []) or []
+        if isinstance(op, dict) and op.get("type") == RESPONSE_TRANSFORMER_TYPE
+    ]
+
+
+def script_like_ops(item):
+    return [
+        op for op in item.get("process", []) or []
+        if isinstance(op, dict) and op.get("type") in {SCRIPT_OPERATOR_TYPE, RESPONSE_TRANSFORMER_TYPE}
     ]
 
 
 def obsolete_argument_keys(item):
     keys = []
-    for op in script_ops(item or {}):
+    for op in script_like_ops(item or {}):
         arguments = (op.get("args") or {}).get("arguments") or {}
         if not isinstance(arguments, dict):
             continue
@@ -429,13 +457,49 @@ def yaml_safe_load(text):
     return yaml.safe_load(text)
 
 
-def analyze_rule_provider_urls(text):
+def load_ai_routing_registry(path):
+    """Return the stable Mihomo logical-provider file mapping for read-back."""
+
+    if not path:
+        return None
+    try:
+        registry = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("unable to load AI routing registry") from exc
+    items = registry.get("items") if isinstance(registry, dict) else None
+    if not isinstance(registry, dict) or registry.get("version") != 2 or not isinstance(items, list):
+        raise RuntimeError("invalid AI routing registry")
+
+    expected_names = ("ai-openai", "ai-anthropic", "ai-xai", "ai-community-supplement")
+    logical_files = {}
+    for item in items:
+        if not isinstance(item, dict) or item.get("enabled") is not True:
+            continue
+        if item.get("client") != "mihomo":
+            continue
+        logical = item.get("logical_provider")
+        if logical not in expected_names:
+            continue
+        filename = item.get("file")
+        if not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", filename):
+            raise RuntimeError("invalid logical Mihomo provider file")
+        if logical in logical_files:
+            raise RuntimeError("duplicate logical Mihomo provider")
+        logical_files[logical] = filename
+    if set(logical_files) != set(expected_names):
+        raise RuntimeError("AI routing registry misses a logical Mihomo provider")
+    return logical_files
+
+
+def analyze_rule_provider_urls(text, logical_ai_files=None):
     result = {
         "provider_count": 0,
         "provider_url_count": 0,
         "mirror_count": 0,
         "third_party_count": 0,
         "third_party_provider_names": [],
+        "missing_logical_ai_providers": [],
+        "wrong_logical_ai_provider_files": [],
     }
     try:
         data = yaml_safe_load(text)
@@ -458,7 +522,19 @@ def analyze_rule_provider_urls(text):
         if host in THIRD_PARTY_RULE_PROVIDER_HOSTS:
             result["third_party_count"] += 1
             result["third_party_provider_names"].append(str(name))
+    if logical_ai_files:
+        for name, filename in logical_ai_files.items():
+            provider = providers.get(name)
+            if not isinstance(provider, dict):
+                result["missing_logical_ai_providers"].append(name)
+                continue
+            url = str(provider.get("url") or "")
+            parsed = urllib.parse.urlparse(url)
+            if parsed.hostname != RULE_MIRROR_HOST or parsed.path != "/rules/" + filename:
+                result["wrong_logical_ai_provider_files"].append(name)
     result["third_party_provider_names"] = sorted(result["third_party_provider_names"])
+    result["missing_logical_ai_providers"] = sorted(result["missing_logical_ai_providers"])
+    result["wrong_logical_ai_provider_files"] = sorted(result["wrong_logical_ai_provider_files"])
     return result
 
 
@@ -510,7 +586,7 @@ def isolated_remote_subscription_names(data):
     for sub in data.get("subs", []) or []:
         if not isinstance(sub, dict):
             continue
-        if sub.get("source") == "remote" and sub.get("ignoreFailedRemoteSub") is True and is_residential_object(sub):
+        if sub.get("source") == "remote" and sub.get("ignoreFailedRemoteSub") is True:
             name = str(sub.get("name") or "")
             if name:
                 names.add(name)
@@ -567,7 +643,7 @@ def docker_log_issue_count(container, data):
     }, ""
 
 
-def analyze_mihomo_output(text):
+def analyze_mihomo_output(text, ai_contract=None, logical_ai_files=None):
     visible_text = normalize_visible_text(text)
     data = yaml_safe_load(text)
     if not isinstance(data, dict):
@@ -589,6 +665,8 @@ def analyze_mihomo_output(text):
     three_x_hy2_items = [item for item in three_x_items if is_three_x_hy2_name(proxy_item_name(item))]
     three_x_vless_items = [item for item in three_x_items if proxy_item_type(item) == "vless"]
     quality = name_quality(names)
+    ai_contract_matches = ai_contract_match_targets(rule_items, ai_contract) if ai_contract else {}
+    ai_negative_matches = ai_contract_negative_targets(rule_items, ai_contract) if ai_contract else {}
     quality.update({
         "bytes": len(text.encode("utf-8")),
         "has_proxies": bool(proxies),
@@ -637,6 +715,7 @@ def analyze_mihomo_output(text):
         "has_self_domain_group": "name: 自有域名" in visible_proxy_groups or "name: '自有域名'" in visible_proxy_groups or "name: \"自有域名\"" in visible_proxy_groups,
         "primary_group_selector_refs": group_body_refs(visible_proxy_groups, "选择代理", "🏡 家宽选择"),
         "ai_group_selector_refs": group_body_refs(visible_proxy_groups, "AI服务", "🏡 家宽选择"),
+        "ai_group_first_proxy": first_group_proxy(visible_proxy_groups, "AI服务"),
         "paypal_group_selector_refs": group_body_refs(visible_proxy_groups, "PayPal", "🏡 家宽选择"),
         "self_domain_direct_refs": group_body_refs(visible_proxy_groups, "自有域名", "DIRECT"),
         "self_domain_first_proxy": first_group_proxy(visible_proxy_groups, "自有域名"),
@@ -647,10 +726,12 @@ def analyze_mihomo_output(text):
         "tencent_geosite_direct_refs": rule_items.count("GEOSITE,tencent,DIRECT"),
         "cn_geosite_direct_refs": rule_items.count("GEOSITE,geolocation-cn,DIRECT") + rule_items.count("GEOSITE,cn,DIRECT"),
         "domestic_direct_before_match": rule_before_match(rule_items, "DOMAIN-SUFFIX,weixin.qq.com,DIRECT"),
-        "ai_group_region_residential_refs": group_body_regex_count(visible_proxy_groups, "AI服务", r"🏡 .+?家宽"),
-        "paypal_group_region_residential_refs": group_body_regex_count(visible_proxy_groups, "PayPal", r"🏡 .+?家宽"),
+        "ai_group_region_residential_refs": group_region_residential_refs(visible_proxy_groups, "AI服务"),
+        "paypal_group_region_residential_refs": group_region_residential_refs(visible_proxy_groups, "PayPal"),
         "forbidden_counts": forbidden_counts(visible_text),
-        "rule_provider_urls": analyze_rule_provider_urls(text),
+        "rule_provider_urls": analyze_rule_provider_urls(text, logical_ai_files),
+        "ai_contract_matches": ai_contract_matches,
+        "ai_negative_matches": ai_negative_matches,
         "ssh_routing": analyze_ssh_routing(rule_items, visible_proxy_groups),
     })
     return quality
@@ -738,6 +819,83 @@ def extract_rules(rules_text):
     ]
 
 
+def load_ai_routing_contract(path):
+    if not path:
+        return None
+    try:
+        contract = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("unable to load AI routing contract") from exc
+    if contract.get("version") != 1 or not isinstance(contract.get("services"), dict):
+        raise RuntimeError("invalid AI routing contract")
+    return contract
+
+
+def explicit_rule_target(rule):
+    parts = [part.strip() for part in str(rule).split(",")]
+    if len(parts) < 3:
+        return None
+    target = parts[-2] if parts[-1] == "no-resolve" else parts[-1]
+    return parts[0], parts[1], target
+
+
+def explicit_rule_matches_host(rule, host):
+    parsed = explicit_rule_target(rule)
+    if not parsed:
+        return False
+    rule_type, value, _ = parsed
+    host = host.lower().rstrip(".")
+    value = value.lower().rstrip(".")
+    if rule_type == "DOMAIN":
+        return host == value
+    if rule_type == "DOMAIN-SUFFIX":
+        return host == value or host.endswith("." + value)
+    return False
+
+
+def first_explicit_domain_target(rule_items, host):
+    for rule in rule_items:
+        if explicit_rule_matches_host(rule, host):
+            parsed = explicit_rule_target(rule)
+            assert parsed is not None
+            return parsed[2]
+    return ""
+
+
+def ai_contract_entries(contract, category):
+    if not contract:
+        return []
+    entries = []
+    for service in ("openai", "anthropic", "xai"):
+        service_data = contract.get("services", {}).get(service, {})
+        for entry in service_data.get(category, []):
+            if not isinstance(entry, dict):
+                continue
+            if category == "conditional" and not entry.get("emit"):
+                continue
+            if entry.get("type") not in {"domain", "suffix"}:
+                continue
+            value = entry.get("value")
+            if isinstance(value, str):
+                entries.append(value.lower().rstrip("."))
+    return entries
+
+
+def ai_contract_match_targets(rule_items, contract):
+    return {host: first_explicit_domain_target(rule_items, host) for host in ai_contract_entries(contract, "required") + ai_contract_entries(contract, "conditional")}
+
+
+def ai_contract_negative_targets(rule_items, contract):
+    # `shared_not_ai` is a routing control as well as documentation.  Keep it
+    # in the same first-match gate as explicit negative controls so a future
+    # broad AI rule cannot silently capture package, telemetry, or CDN hosts.
+    controls = (
+        ai_contract_entries(contract, "negative")
+        + ai_contract_entries(contract, "shared_not_ai")
+    )
+    return {host: first_explicit_domain_target(rule_items, host) for host in controls}
+
+
 def rule_before_match(rule_items, rule):
     try:
         rule_idx = rule_items.index(rule)
@@ -819,8 +977,9 @@ def first_group_proxy(proxy_groups_text, group_name):
     return first.group(1).strip().strip("'\"") if first else ""
 
 
-def group_body_regex_count(proxy_groups_text, group_name, regex):
-    return len(re.findall(regex, group_body(proxy_groups_text, group_name)))
+def group_region_residential_refs(proxy_groups_text, group_name):
+    body = group_body(proxy_groups_text, group_name)
+    return sum(body.count(region_name) for region_name in REGION_RESIDENTIAL_GROUP_NAMES)
 
 
 def same_names(left, right):
@@ -1082,10 +1241,14 @@ def main():
     parser.add_argument("--expected-edge-us-v2-hy2", type=int, default=None)
     parser.add_argument("--min-ios-ordinary-nodes", type=int, default=1)
     parser.add_argument("--min-ios-hy2-nodes", type=int, default=0)
+    parser.add_argument("--ai-routing-contract", default="")
+    parser.add_argument("--ai-routing-registry", default="")
     parser.add_argument("--skip-http", action="store_true")
     args = parser.parse_args()
 
     checks = []
+    ai_contract = load_ai_routing_contract(args.ai_routing_contract)
+    ai_routing_registry = load_ai_routing_registry(args.ai_routing_registry)
     data, data_source = load_substore_data(args.data, args.container)
 
     checks.append(ok("docker container running", docker_running(args.container), args.container))
@@ -1177,10 +1340,14 @@ def main():
             "count=" + str(len(collection_subscription_names(ios_hy2_collection))),
         ))
     if file_item:
-        ops = script_ops(file_item)
-        checks.append(ok("mihomo file has two script operators", len(ops) >= 2, "count=" + str(len(ops))))
-        custom_names = [str(op.get("customName") or "") for op in ops]
-        checks.append(ok("powerfullz operator present", any("powerfullz" in n.lower() for n in custom_names), ", ".join(custom_names)))
+        process_ops = script_like_ops(file_item)
+        transformers = response_transformer_ops(file_item)
+        script_custom_names = [str(op.get("customName") or "") for op in script_ops(file_item)]
+        process_custom_names = [str(op.get("customName") or "") for op in process_ops]
+        transformer_names = [str(op.get("customName") or "") for op in transformers]
+        checks.append(ok("mihomo file has process chain", len(process_ops) >= 2, "count=" + str(len(process_ops))))
+        checks.append(ok("powerfullz script operator present", any("powerfullz" in n.lower() for n in script_custom_names), ", ".join(script_custom_names)))
+        checks.append(ok("frontier skeleton response transformer present", any("frontier-chain-skeleton" in n for n in transformer_names), ", ".join(process_custom_names)))
 
     marker_subs = referenced_remote_subs(data, [args.collection, args.ios_airports_collection])
     missing_markers = [sub.get("name") for sub in marker_subs if not sub_has_source_marker(sub)]
@@ -1315,8 +1482,20 @@ def main():
             except Exception as exc:
                 checks.append(warn("iOS HY2 collection fetch skipped", str(exc)))
             try:
-                final = fetch_local(args.local_base_url, backend_path, "/api/file/%s?target=mihomo" % args.file)
-                http["final_mihomo"] = analyze_mihomo_output(final)
+                final = fetch_local(args.local_base_url, backend_path, "/api/file/%s?target=ClashMeta" % args.file)
+                try:
+                    final_mihomo_target = fetch_local(args.local_base_url, backend_path, "/api/file/%s?target=mihomo" % args.file)
+                    final_hash = hashlib.sha256(final.encode("utf-8")).hexdigest()[:16]
+                    final_mihomo_hash = hashlib.sha256(final_mihomo_target.encode("utf-8")).hexdigest()[:16]
+                    checks.append(ok("final mihomo ClashMeta and mihomo targets match", final == final_mihomo_target, safe_detail_dict({
+                        "clashmeta_bytes": len(final.encode("utf-8")),
+                        "mihomo_bytes": len(final_mihomo_target.encode("utf-8")),
+                        "clashmeta_sha16": final_hash,
+                        "mihomo_sha16": final_mihomo_hash,
+                    })))
+                except Exception as exc:
+                    checks.append(ok("final mihomo mihomo-target fetch", False, str(exc)))
+                http["final_mihomo"] = analyze_mihomo_output(final, ai_contract, ai_routing_registry)
                 checks.append(ok("final mihomo has proxy groups", http["final_mihomo"]["proxy_group_count"] > 1, str(http["final_mihomo"]["proxy_group_count"])))
                 checks.append(ok("final mihomo has rules", http["final_mihomo"]["rule_count"] > 1, str(http["final_mihomo"]["rule_count"])))
                 checks.append(ok("final mihomo has DNS", http["final_mihomo"]["has_dns"]))
@@ -1350,6 +1529,13 @@ def main():
                     "third_party_count": http["final_mihomo"]["rule_provider_urls"]["third_party_count"],
                     "third_party_provider_names": http["final_mihomo"]["rule_provider_urls"]["third_party_provider_names"][:10],
                 })))
+                if ai_routing_registry:
+                    provider_urls = http["final_mihomo"]["rule_provider_urls"]
+                    checks.append(ok("final mihomo has exact logical AI mirror providers", not provider_urls["missing_logical_ai_providers"] and not provider_urls["wrong_logical_ai_provider_files"], safe_detail_dict({
+                        "expected_count": len(ai_routing_registry),
+                        "missing": provider_urls["missing_logical_ai_providers"],
+                        "wrong_file": provider_urls["wrong_logical_ai_provider_files"],
+                    })))
                 checks.append(warn("final mihomo Evoxt/HY2 stats", safe_detail_dict({
                     "evoxt_node_count": http["final_mihomo"]["evoxt_node_count"],
                     "hysteria2_count": http["final_mihomo"]["evoxt_hysteria2_count"],
@@ -1393,11 +1579,17 @@ def main():
                 checks.append(ok("final mihomo has residential selector", http["final_mihomo"]["has_residential_selector"], str(http["final_mihomo"]["residential_selector_refs"])))
                 checks.append(ok("residential selector exposes regional shortcut layer", http["final_mihomo"]["residential_selector_us_refs"] > 0 or http["final_mihomo"]["residential_selector_apac_refs"] > 0, "us=%s apac=%s" % (http["final_mihomo"]["residential_selector_us_refs"], http["final_mihomo"]["residential_selector_apac_refs"])))
                 checks.append(ok("final mihomo keeps AI group", http["final_mihomo"]["has_ai_group"]))
+                checks.append(ok("AI group declares residential selector first", http["final_mihomo"]["ai_group_first_proxy"] == "🏡 家宽选择", http["final_mihomo"]["ai_group_first_proxy"]))
                 checks.append(ok("final mihomo has PayPal group", http["final_mihomo"]["has_paypal_group"]))
                 checks.append(ok("final mihomo has self-domain group", http["final_mihomo"]["has_self_domain_group"]))
                 checks.append(ok("primary select can select residential selector", http["final_mihomo"]["primary_group_selector_refs"] > 0, str(http["final_mihomo"]["primary_group_selector_refs"])))
-                checks.append(ok("AI group can select residential selector", http["final_mihomo"]["ai_group_selector_refs"] > 0, str(http["final_mihomo"]["ai_group_selector_refs"])))
-                checks.append(ok("PayPal group can select residential selector", http["final_mihomo"]["paypal_group_selector_refs"] > 0, str(http["final_mihomo"]["paypal_group_selector_refs"])))
+                checks.append(ok("AI group has exactly one residential selector reference", http["final_mihomo"]["ai_group_selector_refs"] == 1, str(http["final_mihomo"]["ai_group_selector_refs"])))
+                if ai_contract:
+                    ai_targets = http["final_mihomo"]["ai_contract_matches"]
+                    negative_targets = http["final_mihomo"]["ai_negative_matches"]
+                    checks.append(ok("AI contract sentinels first explicitly route to AI service", all(target == "AI服务" for target in ai_targets.values()), safe_detail_dict(ai_targets)))
+                    checks.append(ok("AI contract negative/shared controls do not explicitly route to AI service", all(target != "AI服务" for target in negative_targets.values()), safe_detail_dict(negative_targets)))
+                checks.append(ok("PayPal group has exactly one residential selector reference", http["final_mihomo"]["paypal_group_selector_refs"] == 1, str(http["final_mihomo"]["paypal_group_selector_refs"])))
                 checks.append(ok("self-domain group defaults to DIRECT", http["final_mihomo"]["self_domain_first_proxy"] == "DIRECT", http["final_mihomo"]["self_domain_first_proxy"]))
                 checks.append(ok("self-domain group can select DIRECT", http["final_mihomo"]["self_domain_direct_refs"] > 0, str(http["final_mihomo"]["self_domain_direct_refs"])))
                 checks.append(ok("GLOBAL exposes self-domain group", http["final_mihomo"]["global_self_domain_refs"] > 0, str(http["final_mihomo"]["global_self_domain_refs"])))
@@ -1407,8 +1599,8 @@ def main():
                 checks.append(ok("Tencent geosite routes DIRECT", http["final_mihomo"]["tencent_geosite_direct_refs"] > 0, str(http["final_mihomo"]["tencent_geosite_direct_refs"])))
                 checks.append(ok("China geosite routes DIRECT", http["final_mihomo"]["cn_geosite_direct_refs"] > 0, str(http["final_mihomo"]["cn_geosite_direct_refs"])))
                 checks.append(ok("domestic DIRECT rules appear before MATCH fallback", http["final_mihomo"]["domestic_direct_before_match"]))
-                checks.append(ok("AI group only exposes residential selector layer", http["final_mihomo"]["ai_group_region_residential_refs"] <= 1, str(http["final_mihomo"]["ai_group_region_residential_refs"])))
-                checks.append(ok("PayPal group only exposes residential selector layer", http["final_mihomo"]["paypal_group_region_residential_refs"] <= 1, str(http["final_mihomo"]["paypal_group_region_residential_refs"])))
+                checks.append(ok("AI group has no direct regional residential references", http["final_mihomo"]["ai_group_region_residential_refs"] == 0, str(http["final_mihomo"]["ai_group_region_residential_refs"])))
+                checks.append(ok("PayPal group has no direct regional residential references", http["final_mihomo"]["paypal_group_region_residential_refs"] == 0, str(http["final_mihomo"]["paypal_group_region_residential_refs"])))
                 checks.append(ok("final mihomo has residential candidates", http["final_mihomo"]["residential_candidate_count"] > 0, str(http["final_mihomo"]["residential_candidate_count"])))
                 checks.append(ok("final mihomo has no retired link names", not http["final_mihomo"]["forbidden_counts"], safe_detail_dict(http["final_mihomo"]["forbidden_counts"])))
                 checks.append(ok("final mihomo excludes pseudo/non-direct nodes", http["final_mihomo"]["pseudo_or_non_direct_count"] == 0, str(http["final_mihomo"]["pseudo_or_non_direct_count"])))
@@ -1419,7 +1611,7 @@ def main():
                 else:
                     checks.append(ok("mihomo profile-check passed", profile_ok, profile_detail))
             except Exception as exc:
-                checks.append(warn("final mihomo fetch skipped", str(exc)))
+                checks.append(ok("final mihomo fetch/analyze failed", False, str(exc)))
         else:
             checks.append(warn("HTTP output checks skipped", "backend path unavailable"))
 

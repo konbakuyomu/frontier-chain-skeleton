@@ -7,7 +7,7 @@
  * 入口约定：
  *   - 导出 globalThis.main = function main(config)，接收 mihomo 完整配置对象，返回修改后的配置
  *   - Sparkle override 兼容这种签名（旧版用 operator(proxies) 包装，新版直接吃 main(config)）
- *   - Sub-Store mihomoProfile 文件类型通过 operator(input) 消费上一个 operator 的 $content
+ *   - Sub-Store mihomoProfile 文件类型通过 Response Transformer 消费 response body
  *
  * 运行时参数：
  *   当前版本不再读取住宅代理供应商凭据。家宽节点全部来自 Sub-Store
@@ -453,12 +453,132 @@ function expandIncludeAllGroups(config) {
   return config;
 }
 
+function proxyNamesFromConfig(config) {
+  return (Array.isArray(config.proxies) ? config.proxies : [])
+    .map(proxy => proxy && proxy.name)
+    .filter(name => typeof name === "string" && name.length > 0);
+}
+
+function buildFallbackRegionGroups(proxyNames) {
+  const regionDefs = [
+    { name: "🇭🇰 香港节点", pattern: /🇭🇰|香港|Hong ?Kong|(?<![A-Za-z])HK(?![A-Za-z])|HKG/i },
+    { name: "🇹🇼 台湾节点", pattern: /🇹🇼|台湾|台灣|Taiwan|Taipei|(?<![A-Za-z])TW(?![A-Za-z])|TPE/i },
+    { name: "🇯🇵 日本节点", pattern: /🇯🇵|日本|东京|大阪|Japan|Tokyo|Osaka|(?<![A-Za-z])JP(?![A-Za-z])|NRT|HND|KIX/i },
+    { name: "🇰🇷 韩国节点", pattern: /🇰🇷|韩国|韓国|首尔|Korea|Seoul|(?<![A-Za-z])KR(?![A-Za-z])|ICN/i },
+    { name: "🇸🇬 新加坡节点", pattern: /🇸🇬|新加坡|狮城|Singapore|(?<![A-Za-z])SG(?![A-Za-z])/i },
+    { name: "🇺🇸 美国节点", pattern: /🇺🇸|美国|美國|洛杉矶|圣何塞|纽约|United States|America|(?<![A-Za-z])US(?![A-Za-z])|USA|LAX|SJC|SFO|SEA|JFK|ORD|IAD/i },
+    { name: "🇪🇺 欧洲节点", pattern: /🇬🇧|🇫🇷|🇩🇪|🇳🇱|🇨🇭|🇮🇹|🇪🇸|英国|法国|德国|荷兰|瑞士|意大利|西班牙|Europe|London|Paris|Berlin|Frankfurt|Amsterdam|(?<![A-Za-z])EU(?![A-Za-z])|(?<![A-Za-z])UK(?![A-Za-z])|(?<![A-Za-z])DE(?![A-Za-z])|(?<![A-Za-z])FR(?![A-Za-z])/i },
+  ];
+
+  const groups = [];
+  for (const region of regionDefs) {
+    const hits = proxyNames.filter(name => region.pattern.test(name));
+    if (hits.length === 0) continue;
+    groups.push({
+      name: region.name,
+      type: "url-test",
+      proxies: hits,
+      url: "http://cp.cloudflare.com/generate_204",
+      interval: 300,
+      tolerance: 50,
+      lazy: true,
+    });
+  }
+  return groups;
+}
+
+function buildFallbackMihomoBase(config) {
+  const proxyNames = proxyNamesFromConfig(config);
+  const manualProxies = proxyNames.length > 0 ? proxyNames : ["DIRECT"];
+  const regionGroups = buildFallbackRegionGroups(proxyNames);
+  const regionGroupNames = regionGroups.map(group => group.name);
+  const primaryChoices = uniqueList([
+    ...regionGroupNames,
+    "自动选择",
+    "故障转移",
+    "手动选择",
+    "DIRECT",
+  ]);
+  const businessChoices = uniqueList(["选择代理", "手动选择", "DIRECT"]);
+
+  logWarn("检测到 only-proxies Mihomo 输入，使用 skeleton fallback base 生成基础代理组");
+  return {
+    ...config,
+    "proxy-groups": [
+      {
+        name: "选择代理",
+        type: "select",
+        proxies: primaryChoices.length > 0 ? primaryChoices : ["DIRECT"],
+      },
+      {
+        name: "手动选择",
+        type: "select",
+        proxies: manualProxies,
+      },
+      {
+        name: "自动选择",
+        type: "url-test",
+        proxies: manualProxies,
+        url: "http://cp.cloudflare.com/generate_204",
+        interval: 300,
+        tolerance: 50,
+        lazy: true,
+      },
+      {
+        name: "故障转移",
+        type: "fallback",
+        proxies: manualProxies,
+        url: "http://cp.cloudflare.com/generate_204",
+        interval: 300,
+        lazy: true,
+      },
+      ...regionGroups,
+      {
+        name: "静态资源",
+        type: "select",
+        proxies: businessChoices,
+      },
+      {
+        name: "谷歌服务",
+        type: "select",
+        proxies: businessChoices,
+      },
+      {
+        name: "苹果服务",
+        type: "select",
+        proxies: businessChoices,
+      },
+      {
+        name: "AI服务",
+        type: "select",
+        proxies: businessChoices,
+      },
+      {
+        name: "GLOBAL",
+        type: "select",
+        proxies: uniqueList(["选择代理", "AI服务", "PayPal", SELF_DOMAIN_GROUP_NAME, "DIRECT"]),
+      },
+    ],
+    "rule-providers": isConfigObject(config["rule-providers"]) ? config["rule-providers"] : {},
+    rules: Array.isArray(config.rules) ? config.rules : ["MATCH,选择代理"],
+  };
+}
+
+function ensureMihomoBaseConfig(config) {
+  if (needsUpstreamMihomoBase(config)) {
+    return buildFallbackMihomoBase(config);
+  }
+  return config;
+}
+
 
 // ============================================================
 // 主入口
 // ============================================================
 
 function main(config) {
+  config = ensureMihomoBaseConfig(config || {});
+
   // ================================================
   // ===== DNS 防泄露 + TUN 兼容性（强制覆盖）=====
   // ================================================
@@ -530,144 +650,169 @@ function main(config) {
   if (AI.enabled) {
     const aiGroup = findAIGroup(config, selectGroup, AI.targetGroup);
     if (aiGroup) {
-      // mihomo RULE-SET 必须引用 rule-providers 字典里注册的 provider name，
-      // 不支持 inline URL（实测 mihomo profile-check 会报 "rule set <url> not found"）。
-      // 我们注册 4 个 AI providers（dustin 全集 + blackmatrix7 三家拆分），让规则集提前异步拉。
+      // AI-ROUTING:BEGIN
+      // Generated from ai-routing-contract.json and subscription-hub/rules.json.
+      const managedAiProviderNames = new Set([
+        "ai-dustin",
+        "ai-openai",
+        "ai-claude",
+        "ai-anthropic",
+        "ai-xai",
+        "ai-community-supplement",
+        "ai-gemini",
+      ]);
+      const historicalBroadAiRules = new Set([
+        "DOMAIN-SUFFIX,sentry.io",
+        "DOMAIN-SUFFIX,statsigapi.net",
+        "DOMAIN-SUFFIX,datadoghq.com",
+        "DOMAIN-KEYWORD,browser-intake",
+        "DOMAIN-KEYWORD,datadog",
+        "DOMAIN-KEYWORD,sentry",
+        "DOMAIN-KEYWORD,statsig",
+        "DOMAIN-KEYWORD,sift",
+        "DOMAIN-SUFFIX,intercom.io",
+        "DOMAIN-SUFFIX,intercomcdn.com",
+        "DOMAIN-SUFFIX,website-files.com",
+        "DOMAIN-SUFFIX,challenges.cloudflare.com",
+        "DOMAIN,static.cloudflareinsights.com",
+        "DOMAIN-SUFFIX,host.livekit.cloud",
+        "DOMAIN-SUFFIX,turn.livekit.cloud",
+        "DOMAIN-SUFFIX,client-api.arkoselabs.com",
+        "GEOSITE,category-ntp",
+      ]);
+      const negativeAiDomainControls = new Set([
+        "x.com",
+      ]);
+      const negativeAiSuffixControls = new Set([
+      ]);
+      function isNegativeAiControl(parts) {
+        const ruleType = parts[0];
+        const ruleValue = String(parts[1] || "").toLowerCase().replace(/[.]$/, "");
+        if (ruleType !== "DOMAIN" && ruleType !== "DOMAIN-SUFFIX") return false;
+        if (negativeAiDomainControls.has(ruleValue)) return true;
+        return [...negativeAiSuffixControls].some(control =>
+          ruleValue === control || ruleValue.endsWith(`.${control}`)
+        );
+      }
       const aiProviders = {
-        "ai-dustin": {
-          type: "http", behavior: "domain", format: "mrs",
-          url: ruleMirrorUrl("mihomo-ai-dustin.mrs"),
-          path: "./ruleset/ai-dustin.mrs", interval: 86400,
-          proxy: selectGroup
-        },
         "ai-openai": {
           type: "http", behavior: "classical", format: "text",
-          url: ruleMirrorUrl("mihomo-ai-openai.list"),
+          url: ruleMirrorUrl("mihomo-ai-openai-v2.list"),
           path: "./ruleset/ai-openai.list", interval: 86400,
-          proxy: selectGroup
+          proxy: selectGroup,
         },
-        "ai-claude": {
+        "ai-anthropic": {
           type: "http", behavior: "classical", format: "text",
-          url: ruleMirrorUrl("mihomo-ai-claude.list"),
-          path: "./ruleset/ai-claude.list", interval: 86400,
-          proxy: selectGroup
+          url: ruleMirrorUrl("mihomo-ai-anthropic-v2.list"),
+          path: "./ruleset/ai-anthropic.list", interval: 86400,
+          proxy: selectGroup,
+        },
+        "ai-xai": {
+          type: "http", behavior: "classical", format: "text",
+          url: ruleMirrorUrl("mihomo-ai-xai-v2.list"),
+          path: "./ruleset/ai-xai.list", interval: 86400,
+          proxy: selectGroup,
+        },
+        "ai-community-supplement": {
+          type: "http", behavior: "classical", format: "text",
+          url: ruleMirrorUrl("mihomo-ai-community-supplement-v2.list"),
+          path: "./ruleset/ai-community-supplement.list", interval: 86400,
+          proxy: selectGroup,
         },
         "ai-gemini": {
           type: "http", behavior: "classical", format: "text",
           url: ruleMirrorUrl("mihomo-ai-gemini.list"),
           path: "./ruleset/ai-gemini.list", interval: 86400,
-          proxy: selectGroup
+          proxy: selectGroup,
         },
       };
-      config["rule-providers"] = { ...(config["rule-providers"] || {}), ...aiProviders };
-
+      const retainedRuleProviders = { ...(config["rule-providers"] || {}) };
+      for (const providerName of managedAiProviderNames) delete retainedRuleProviders[providerName];
+      config["rule-providers"] = { ...retainedRuleProviders, ...aiProviders };
+      function readExtraAiApiHosts() {
+        const collected = [];
+        if (typeof globalThis !== "undefined" && Array.isArray(globalThis.__frontierExtraAiApiHosts)) {
+          collected.push(...globalThis.__frontierExtraAiApiHosts);
+        }
+        try {
+          if (typeof $arguments !== "undefined" && $arguments && $arguments.extra_ai_api_hosts) {
+            const raw = $arguments.extra_ai_api_hosts;
+            if (Array.isArray(raw)) collected.push(...raw);
+            else if (typeof raw === "string" && raw.trim()) collected.push(...raw.split(/[\s,]+/));
+          }
+        } catch (error) {}
+        const hostRe = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i;
+        const unique = [];
+        for (const item of collected) {
+          const host = String(item || "").trim().toLowerCase().replace(/[.]$/, "");
+          if (!hostRe.test(host) || unique.includes(host)) continue;
+          unique.push(host);
+        }
+        return unique;
+      }
+      const extraAiApiHostRules = readExtraAiApiHosts().map(host => `DOMAIN,${host},${aiGroup}`);
       const aiRules = [
-        // 层1：远程 rule-providers（mihomo 标准写法）
-        `RULE-SET,ai-dustin,${aiGroup}`,
-        `RULE-SET,ai-openai,${aiGroup}`,
-        `RULE-SET,ai-claude,${aiGroup}`,
-        `RULE-SET,ai-gemini,${aiGroup}`,
-
-        // 2a：Anthropic 核心域名
+        // Official required baseline, then selected conditional first-party hosts.
+        `DOMAIN-SUFFIX,chatgpt.com,${aiGroup}`,
+        `DOMAIN-SUFFIX,openai.com,${aiGroup}`,
+        `DOMAIN-SUFFIX,oaistatic.com,${aiGroup}`,
+        `DOMAIN-SUFFIX,oaiusercontent.com,${aiGroup}`,
+        `DOMAIN-SUFFIX,oaistatsig.com,${aiGroup}`,
+        `DOMAIN,cdn.openaimerge.com,${aiGroup}`,
+        `DOMAIN,api.openai.com,${aiGroup}`,
+        `DOMAIN,auth.openai.com,${aiGroup}`,
         `DOMAIN-SUFFIX,anthropic.com,${aiGroup}`,
+        `DOMAIN,api.anthropic.com,${aiGroup}`,
+        `DOMAIN,grok.com,${aiGroup}`,
+        `DOMAIN,cdn.grok.com,${aiGroup}`,
+        `DOMAIN,api.x.ai,${aiGroup}`,
         `DOMAIN-SUFFIX,claude.ai,${aiGroup}`,
         `DOMAIN-SUFFIX,claude.com,${aiGroup}`,
-        `DOMAIN-SUFFIX,clau.de,${aiGroup}`,
-        `DOMAIN-SUFFIX,claudemcpclient.com,${aiGroup}`,
         `DOMAIN-SUFFIX,claudeusercontent.com,${aiGroup}`,
-
-        // 2b：Anthropic CDN / 基础设施
-        `DOMAIN,cdn.anthropic.com,${aiGroup}`,
-        `DOMAIN-SUFFIX,anthropic.com.cdn.cloudflare.net,${aiGroup}`,
-        `DOMAIN,servd-anthropic-website.b-cdn.net,${aiGroup}`,
-        `DOMAIN-SUFFIX,website-files.com,${aiGroup}`,
-
-        // 2c：Anthropic 认证 / 内容
-        `DOMAIN,anthropic.auth0.com,${aiGroup}`,
-        `DOMAIN,anthropic-com.ghost.io,${aiGroup}`,
-
-        // 2d：监控 / 遥测 / 反欺诈
-        `DOMAIN-SUFFIX,sentry.io,${aiGroup}`,
-        `DOMAIN-SUFFIX,statsigapi.net,${aiGroup}`,
-        `DOMAIN-SUFFIX,datadoghq.com,${aiGroup}`,
-        `DOMAIN-KEYWORD,browser-intake,${aiGroup}`,
-        `DOMAIN-KEYWORD,datadog,${aiGroup}`,
-        `DOMAIN-KEYWORD,sentry,${aiGroup}`,
-        `DOMAIN-KEYWORD,statsig,${aiGroup}`,
-        `DOMAIN-KEYWORD,sift,${aiGroup}`,
-
-        // 2e：widget / 第三方嵌入
-        `DOMAIN-SUFFIX,intercom.io,${aiGroup}`,
-        `DOMAIN-SUFFIX,intercomcdn.com,${aiGroup}`,
-        `DOMAIN,cdn.x.anthropic.com,${aiGroup}`,
-        `DOMAIN,cdn.usefathom.com,${aiGroup}`,
-
-        // 2f：Anthropic ASN / IP 段兜底
-        // 注：以下 3 条 IP 规则在 Shadowrocket 端可能失效（IP-ASN 需 ASN 库；IP-CIDR 通常 OK），保留作 Sparkle 端兜底
-        `IP-CIDR,160.79.104.0/21,${aiGroup},no-resolve`,
-        `IP-CIDR6,2607:6bc0::/32,${aiGroup},no-resolve`,
-        `IP-ASN,399358,${aiGroup},no-resolve`,
-
-        // 2g：Gemini CLI 冷启动兜底
+        `DOMAIN-SUFFIX,claudemcpclient.com,${aiGroup}`,
+        `DOMAIN-SUFFIX,claudemcpcontent.com,${aiGroup}`,
+        `DOMAIN-SUFFIX,clau.de,${aiGroup}`,
+        `DOMAIN,platform.claude.com,${aiGroup}`,
+        `DOMAIN,mcp-proxy.anthropic.com,${aiGroup}`,
+        `DOMAIN,bridge.claudeusercontent.com,${aiGroup}`,
+        `DOMAIN,downloads.claude.ai,${aiGroup}`,
+        `DOMAIN-SUFFIX,x.ai,${aiGroup}`,
+        `DOMAIN,assets.grok.com,${aiGroup}`,
+        `DOMAIN,grok.x.com,${aiGroup}`,
+        // Preserve the existing Gemini CLI compatibility baseline.
         `DOMAIN,cloudcode-pa.googleapis.com,${aiGroup}`,
         `DOMAIN,cloudaicompanion.googleapis.com,${aiGroup}`,
         `DOMAIN-SUFFIX,generativelanguage.googleapis.com,${aiGroup}`,
         `DOMAIN-SUFFIX,aistudio.google.com,${aiGroup}`,
-
-        // 2h：OpenAI / Codex 冷启动兜底
-        `DOMAIN-SUFFIX,openai.com,${aiGroup}`,
-        `DOMAIN-SUFFIX,chatgpt.com,${aiGroup}`,
-        `DOMAIN-SUFFIX,oaistatic.com,${aiGroup}`,
-        `DOMAIN-SUFFIX,oaiusercontent.com,${aiGroup}`,
-
-        // 2i：NTP 时区检测
-        `GEOSITE,category-ntp,${aiGroup}`,
-
-        // 2j：OpenAI / Codex 显式核心域（已被 +.openai.com 覆盖；显式 DOMAIN 比 mrs 拉取早一拍生效）
-        `DOMAIN,auth.openai.com,${aiGroup}`,
-        `DOMAIN,auth0.openai.com,${aiGroup}`,
-        `DOMAIN,api.openai.com,${aiGroup}`,
-        `DOMAIN,platform.openai.com,${aiGroup}`,
-        `DOMAIN,developers.openai.com,${aiGroup}`,
-        `DOMAIN,cdn.openai.com,${aiGroup}`,
-        `DOMAIN,sip.api.openai.com,${aiGroup}`,
-        `DOMAIN,videos.openai.com,${aiGroup}`,
-
-        // 2k：Sora / OpenAI 收购的独立域（DustinWin mrs 含；本地兜底）
-        `DOMAIN-SUFFIX,sora.com,${aiGroup}`,
-        `DOMAIN-SUFFIX,chat.com,${aiGroup}`,
-
-        // 2l：Advanced Voice / 语音对话（OpenAI 在 LiveKit Cloud 上的专属项目子域）
-        `DOMAIN-SUFFIX,chatgpt.livekit.cloud,${aiGroup}`,
-        `DOMAIN-SUFFIX,host.livekit.cloud,${aiGroup}`,
-        `DOMAIN-SUFFIX,turn.livekit.cloud,${aiGroup}`,
-
-        // 2m：Arkose Labs FunCaptcha（漏过会触发账号风控 / challenge 死循环）
-        `DOMAIN,openai-api.arkoselabs.com,${aiGroup}`,
-        `DOMAIN-SUFFIX,client-api.arkoselabs.com,${aiGroup}`,
-
-        // 2n：Cloudflare Turnstile（共享租户但必须跟 ChatGPT 走代理，两源都没收）
-        `DOMAIN-SUFFIX,challenges.cloudflare.com,${aiGroup}`,
-        `DOMAIN,static.cloudflareinsights.com,${aiGroup}`,
-
-        // 2o：OpenAI 专属 Azure CDN / 存储桶（hard-route，零污染）
-        `DOMAIN,openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net,${aiGroup}`,
-        `DOMAIN,openaicomproductionae4b.blob.core.windows.net,${aiGroup}`,
-        `DOMAIN,production-openaicom-storage.azureedge.net,${aiGroup}`,
-        `DOMAIN-SUFFIX,openaiapi-site.azureedge.net,${aiGroup}`,
-        `DOMAIN-SUFFIX,openaicom.imgix.net,${aiGroup}`,
-
-        // 2p：OpenAI 实验/反欺诈具体子域（关键词 statsig/datadog 已兜底，这里加快命中）
-        `DOMAIN-SUFFIX,featuregates.org,${aiGroup}`,
-        `DOMAIN-SUFFIX,events.statsigapi.net,${aiGroup}`,
-        `DOMAIN,browser-intake-datadoghq.com,${aiGroup}`,
+        `DOMAIN,claude.googleapis.com,${aiGroup}`,
+        ...extraAiApiHostRules,
+        // Policy-projected SJC logical providers only supplement the local baseline.
+        `RULE-SET,ai-openai,${aiGroup}`,
+        `RULE-SET,ai-anthropic,${aiGroup}`,
+        `RULE-SET,ai-xai,${aiGroup}`,
+        `RULE-SET,ai-community-supplement,${aiGroup}`,
+        `RULE-SET,ai-gemini,${aiGroup}`
       ];
-
+      const canonicalAiRules = new Set(aiRules.map(rule => String(rule).trim()));
+      let removedManagedAiRules = 0;
+      if (Array.isArray(config.rules)) {
+        config.rules = config.rules.filter(rule => {
+          const parts = String(rule).split(",").map(part => part.trim());
+          if (getRuleTarget(rule) !== aiGroup) return true;
+          const ruleHead = `${parts[0]},${parts[1]}`;
+          const isManagedProvider = parts[0] === "RULE-SET" && managedAiProviderNames.has(parts[1]);
+          const isCanonicalBaseline = canonicalAiRules.has(String(rule).trim());
+          if (!isManagedProvider && !isCanonicalBaseline && !historicalBroadAiRules.has(ruleHead) && !isNegativeAiControl(parts)) return true;
+          removedManagedAiRules += 1;
+          return false;
+        });
+      }
       if (config.rules && Array.isArray(config.rules)) {
         validateRuleTargets(config, aiRules);
         const insertedAiRules = prependUniqueRules(config, aiRules);
-        logInfo(`策略组解析：select="${selectGroup}", google="${googleGroup}", ai="${aiGroup}"；新增规则 fixed=${insertedFixedRules.length}, ai=${insertedAiRules.length}`);
+        logInfo(`AI routing contract applied: removed=${removedManagedAiRules}, baseline=26, providers=4, inserted=${insertedAiRules.length}`);
       }
+      // AI-ROUTING:END
     }
   }
 
@@ -1016,9 +1161,9 @@ function main(config) {
     // 5) 业务组镜像家宽选择层（spec §6.9）
     //    powerfullz 自动生成的业务组（AI服务/苹果服务/谷歌服务/Netflix/...）proxies 默认只含
     //    18 国 + 选择代理 + 低倍率 + 手动选择 + 直连共 21 项，**不含**我们的 🏡 *家宽 组。
-    //    这里把全部 select 类型的非工具组遍历一遍，只追加稳定的 🏡 家宽选择。
+    //    这里把全部 select 类型的非工具组遍历一遍；只有 AI服务 固定把稳定家宽选择放在首项。
     //    区域家宽组留在 🏡 家宽选择 内部，避免每个业务组都摊开 9 个家宽选项。
-    //    push 到末尾不改 default，原 powerfullz 选首项的默认行为保留。
+    //    其他业务组仍在末尾追加，保留其原有默认选择。
     //    具体家宽节点只出现在 🏡 家宽选择 内部，由 include-all + filter 动态吸纳。
     const TOOL_GROUPS_EXCLUDE = new Set([
       "GLOBAL",
@@ -1040,14 +1185,23 @@ function main(config) {
     );
 
     let mirroredCount = 0;
+    let aiDefaultAdjusted = false;
     for (const g of businessGroups) {
       g.proxies = withoutRegionResidentialGroups(g.proxies);
-      if (!g.proxies.includes(RESIDENTIAL_SELECTOR_NAME)) {
+      const hasResidentialSelector = g.proxies.includes(RESIDENTIAL_SELECTOR_NAME);
+      if (g.name === "AI服务") {
+        const previousFirst = g.proxies[0];
+        g.proxies = [
+          RESIDENTIAL_SELECTOR_NAME,
+          ...g.proxies.filter(name => name !== RESIDENTIAL_SELECTOR_NAME),
+        ];
+        aiDefaultAdjusted = !hasResidentialSelector || previousFirst !== RESIDENTIAL_SELECTOR_NAME;
+      } else if (!hasResidentialSelector) {
         g.proxies.push(RESIDENTIAL_SELECTOR_NAME);
         mirroredCount++;
       }
     }
-    logInfo(`业务组镜像家宽选择层完成：${businessGroups.length} 组追加，共 ${mirroredCount} 处组插入`);
+    logInfo(`业务组镜像家宽选择层完成：${businessGroups.length} 组追加，共 ${mirroredCount} 处组插入；AI服务默认家宽=${aiDefaultAdjusted}`);
   }
 
   // ================================================
@@ -1074,7 +1228,88 @@ function main(config) {
 // 入口暴露——兼容 Sparkle / Sub-Store mihomoProfile
 // ============================================================
 
+function isConfigObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasFinalMihomoShape(config) {
+  return isConfigObject(config) &&
+    Array.isArray(config.proxies) &&
+    Array.isArray(config["proxy-groups"]) &&
+    Array.isArray(config.rules) &&
+    isConfigObject(config["rule-providers"]) &&
+    isConfigObject(config.dns);
+}
+
+function needsUpstreamMihomoBase(config) {
+  return isConfigObject(config) &&
+    Array.isArray(config.proxies) &&
+    !Array.isArray(config["proxy-groups"]) &&
+    !Array.isArray(config.rules);
+}
+
+async function buildFinalMihomoFromProxies(proxies, label) {
+  if (typeof UPSTREAM_MIHOMO_MAIN !== "function") {
+    logWarn(`${label} 是节点列表但没有可用上游 main，改用 skeleton fallback base`);
+    return main(buildFallbackMihomoBase({ proxies }));
+  }
+
+  const upstreamConfig = await UPSTREAM_MIHOMO_MAIN({ proxies });
+  if (!isConfigObject(upstreamConfig)) {
+    logWarn(`${label} 上游 main 没有返回有效 Mihomo 配置，改用 skeleton fallback base`);
+    return main(buildFallbackMihomoBase({ proxies }));
+  }
+  return main(upstreamConfig);
+}
+
+async function finalizeMihomoConfig(config, label, options = {}) {
+  if (!isConfigObject(config)) return null;
+  if (needsUpstreamMihomoBase(config)) {
+    const rebuilt = await buildFinalMihomoFromProxies(config.proxies, label);
+    if (rebuilt) return rebuilt;
+    if (options.strictUpstream) return null;
+  }
+  return main(config);
+}
+
 async function operator(input = [], targetPlatform, context) {
+  if (
+    input &&
+    typeof input === "object" &&
+    !Array.isArray(input) &&
+    typeof input.body === "string"
+  ) {
+    let config = null;
+    try {
+      config = ProxyUtils.yaml.safeLoad(input.body);
+    } catch (e) {
+      logWarn(`Sub-Store response body 解析失败，保守返回原响应：${e && e.message ? e.message : e}`);
+      return input;
+    }
+    const finalConfig = await finalizeMihomoConfig(config, "Sub-Store response body", { strictUpstream: true });
+    if (!finalConfig) return input;
+    input.body = ProxyUtils.yaml.safeDump(finalConfig);
+    return input;
+  }
+
+  if (typeof input === "string") {
+    let config = null;
+    try {
+      config = ProxyUtils.yaml.safeLoad(input);
+    } catch (e) {
+      logWarn(`Sub-Store mihomoProfile string body 解析失败，保守返回原内容：${e && e.message ? e.message : e}`);
+      return input;
+    }
+    const finalConfig = await finalizeMihomoConfig(config, "Sub-Store mihomoProfile string body", { strictUpstream: true });
+    if (!finalConfig) return input;
+    return ProxyUtils.yaml.safeDump(finalConfig);
+  }
+
+  if (Array.isArray(input)) {
+    const finalConfig = await buildFinalMihomoFromProxies(input, "Sub-Store proxy array");
+    return finalConfig || input;
+  }
+
   if (
     input &&
     typeof input === "object" &&
@@ -1113,7 +1348,9 @@ async function operator(input = [], targetPlatform, context) {
       return input;
     }
 
-    input.$content = ProxyUtils.yaml.safeDump(await main(config));
+    const finalConfig = await finalizeMihomoConfig(config, "Sub-Store mihomoProfile content", { strictUpstream: true });
+    if (!finalConfig) return input;
+    input.$content = ProxyUtils.yaml.safeDump(finalConfig);
     return input;
   }
 
@@ -1123,17 +1360,22 @@ async function operator(input = [], targetPlatform, context) {
     !Array.isArray(input) &&
     (Array.isArray(input.proxies) || Array.isArray(input["proxy-groups"]) || Array.isArray(input.rules))
   ) {
-    return main(input);
+    return finalizeMihomoConfig(input, "Mihomo config object");
   }
 
   return input;
 }
 
+async function transformFunction(res = {}, context) {
+  return operator(res, undefined, context);
+}
+
 if (typeof globalThis !== "undefined") {
   globalThis.main = main;
+  globalThis.transformFunction = transformFunction;
   globalThis.__frontierSkeletonMain = main;
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { main, operator };
+  module.exports = { main, operator, transformFunction };
 }

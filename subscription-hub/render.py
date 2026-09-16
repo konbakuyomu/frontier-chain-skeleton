@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from ai_routing import active_items, derived_registry_counts, load_contract, validate_registry
+
 
 ROOT = Path(__file__).resolve().parents[1]
 HUB_DIR = Path(__file__).resolve().parent
@@ -27,6 +29,9 @@ DEFAULT_TEMPLATE = HUB_DIR / "templates" / "index.html"
 DEFAULT_SHADOWROCKET_CONF = ROOT / "shadowrocket.conf"
 DEFAULT_RULE_REGISTRY = HUB_DIR / "rules.json"
 DEFAULT_RULE_MIRROR = HUB_DIR / "rule_mirror.py"
+DEFAULT_AI_ROUTING_CONTRACT = ROOT / "ai-routing-contract.json"
+DEFAULT_AI_ROUTING_SCHEMA = ROOT / "ai-routing-contract.schema.json"
+DEFAULT_AI_ROUTING_MODULE = HUB_DIR / "ai_routing.py"
 
 REQUIRED_KEYS = [
     "HUB_PUBLIC_BASE_URL",
@@ -124,38 +129,16 @@ def substore_url(env: dict[str, str], suffix: str) -> str:
     return base + backend + suffix
 
 
-def rule_registry(path: Path) -> dict[str, object]:
+def rule_registry(path: Path, contract_path: Path) -> dict[str, object]:
     try:
         registry = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise SystemExit(f"missing rule registry: {path}") from exc
-    items = registry.get("items")
-    if not isinstance(items, list) or not items:
-        raise SystemExit("rule registry must contain non-empty items[]")
-    seen_ids: set[str] = set()
-    seen_files: set[str] = set()
-    for item in items:
-        if not isinstance(item, dict):
-            raise SystemExit("rule registry item must be an object")
-        rule_id = str(item.get("id") or "")
-        filename = str(item.get("file") or "")
-        source = str(item.get("source") or "")
-        client = str(item.get("client") or "")
-        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", rule_id):
-            raise SystemExit(f"invalid rule id: {rule_id}")
-        if rule_id in seen_ids:
-            raise SystemExit(f"duplicate rule id: {rule_id}")
-        seen_ids.add(rule_id)
-        if not re.fullmatch(r"[A-Za-z0-9._-]+", filename):
-            raise SystemExit(f"invalid rule filename: {filename}")
-        if filename in seen_files:
-            raise SystemExit(f"duplicate rule filename: {filename}")
-        seen_files.add(filename)
-        if not source.startswith("https://"):
-            raise SystemExit(f"rule source must be https for {rule_id}")
-        if client not in {"shadowrocket", "mihomo"}:
-            raise SystemExit(f"invalid rule client for {rule_id}: {client}")
-    return registry
+    try:
+        contract = load_contract(contract_path)
+        return validate_registry(registry, contract)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def rule_path_prefix(registry: dict[str, object]) -> str:
@@ -167,7 +150,7 @@ def rule_mirror_url_map(env: dict[str, str], registry: dict[str, object]) -> dic
     base = normalize_base_url(env["HUB_PUBLIC_BASE_URL"])
     prefix = rule_path_prefix(registry).rstrip("/")
     mapping: dict[str, str] = {}
-    for item in registry["items"]:
+    for item in active_items(registry):
         source = str(item["source"])
         filename = str(item["file"])
         target = public_url(base, prefix + "/" + filename)
@@ -316,24 +299,27 @@ def links_payload(endpoints: list[dict[str, str]], status: dict[str, object]) ->
 def rule_status_payload(registry: dict[str, object]) -> dict[str, object]:
     now = dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
     items = []
-    for item in registry["items"]:
-        items.append(
-            {
-                "id": item["id"],
-                "client": item["client"],
-                "rule_type": item["rule_type"],
-                "format": item["format"],
-                "file": item["file"],
-                "source_host": urlparse(str(item["source"])).hostname or "",
-                "status": "generated",
-                "http_status": None,
-                "last_checked": "",
-                "last_success": "",
-                "bytes": None,
-                "sha256": "",
-                "error": "",
-            }
-        )
+    for item in active_items(registry):
+        status_item = {
+            "id": item["id"],
+            "client": item["client"],
+            "rule_type": item["rule_type"],
+            "format": item["format"],
+            "file": item["file"],
+            "source_host": urlparse(str(item["source"])).hostname or "",
+            "status": "generated",
+            "http_status": None,
+            "last_checked": "",
+            "last_success": "",
+            "bytes": None,
+            "sha256": "",
+            "error": "",
+            "semantic": {"status": "pending" if item.get("logical_provider") else "not-applicable"},
+        }
+        if item.get("logical_provider"):
+            status_item["logical_provider"] = item["logical_provider"]
+            status_item["covers"] = list(item.get("covers") or [])
+        items.append(status_item)
     return {
         "generated_at": now,
         "summary": {
@@ -342,6 +328,7 @@ def rule_status_payload(registry: dict[str, object]) -> dict[str, object]:
             "stale": 0,
             "failed": 0,
         },
+        "registry": derived_registry_counts(registry),
         "items": items,
     }
 
@@ -712,7 +699,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=/opt/frontier/subscription-hub/secrets/hub.runtime.env
-ExecStart=/usr/bin/python3 /opt/frontier/subscription-hub/app/rule_mirror.py --sync --registry /opt/frontier/subscription-hub/app/rules.json --public-dir /opt/frontier/subscription-hub/public
+ExecStart=/usr/bin/python3 /opt/frontier/subscription-hub/app/rule_mirror.py --sync --registry /opt/frontier/subscription-hub/app/rules.json --contract /opt/frontier/subscription-hub/app/ai-routing-contract.json --public-dir /opt/frontier/subscription-hub/public
 NoNewPrivileges=true
 """
 
@@ -752,7 +739,7 @@ def write_outputs(args: argparse.Namespace, env: dict[str, str]) -> None:
     secrets_dir.mkdir(parents=True, exist_ok=True)
     ingress_dir.mkdir(parents=True, exist_ok=True)
 
-    registry = rule_registry(Path(args.rule_registry))
+    registry = rule_registry(Path(args.rule_registry), Path(args.ai_routing_contract))
     mirror_map = rule_mirror_url_map(env, registry)
     endpoints = endpoint_defs(env)
     status = status_for(endpoints)
@@ -772,6 +759,9 @@ def write_outputs(args: argparse.Namespace, env: dict[str, str]) -> None:
     app_dir.mkdir(parents=True, exist_ok=True)
     (app_dir / "server.py").write_text(service_py(), encoding="utf-8")
     (app_dir / "rule_mirror.py").write_text(Path(args.rule_mirror).read_text(encoding="utf-8"), encoding="utf-8")
+    (app_dir / "ai_routing.py").write_text(DEFAULT_AI_ROUTING_MODULE.read_text(encoding="utf-8"), encoding="utf-8")
+    (app_dir / "ai-routing-contract.json").write_text(Path(args.ai_routing_contract).read_text(encoding="utf-8"), encoding="utf-8")
+    (app_dir / "ai-routing-contract.schema.json").write_text(DEFAULT_AI_ROUTING_SCHEMA.read_text(encoding="utf-8"), encoding="utf-8")
     (app_dir / "rules.json").write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out_dir / "subscription-hub.service").write_text(systemd_unit(), encoding="utf-8")
     (out_dir / "subscription-rule-mirror.service").write_text(rule_mirror_service(), encoding="utf-8")
@@ -788,13 +778,21 @@ def write_outputs(args: argparse.Namespace, env: dict[str, str]) -> None:
         "page_url_hash": hashlib.sha256(public_url(normalize_base_url(env["HUB_PUBLIC_BASE_URL"]), env["HUB_PAGE_PATH"]).encode("utf-8")).hexdigest()[:16],
         "endpoint_count": len(endpoints),
         "endpoint_hashes": {item["id"]: hashlib.sha256(item["url"].encode("utf-8")).hexdigest()[:16] for item in endpoints},
-        "rule_mirror_count": len(registry["items"]),
+        "rule_mirror_count": derived_registry_counts(registry)["total"],
+        "rule_mirror_registry": derived_registry_counts(registry),
         "rule_mirror_path_prefix": rule_path_prefix(registry),
     }
     (out_dir / "manifest.safe.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def check_env(env: dict[str, str], *, allow_placeholders: bool, registry_path: Path, shadowrocket_conf: Path) -> None:
+def check_env(
+    env: dict[str, str],
+    *,
+    allow_placeholders: bool,
+    registry_path: Path,
+    contract_path: Path,
+    shadowrocket_conf: Path,
+) -> None:
     normalize_base_url(env["HUB_PUBLIC_BASE_URL"])
     for key in [
         "HUB_PAGE_PATH",
@@ -816,14 +814,14 @@ def check_env(env: dict[str, str], *, allow_placeholders: bool, registry_path: P
         raise SystemExit("hub paths must be unique")
     if not shadowrocket_conf.exists():
         raise SystemExit(f"missing shadowrocket.conf: {shadowrocket_conf}")
-    registry = rule_registry(registry_path)
-    items = registry["items"]
-    sr_count = sum(1 for item in items if item.get("client") == "shadowrocket")
-    mihomo_count = sum(1 for item in items if item.get("client") == "mihomo")
-    if sr_count != 18:
-        raise SystemExit(f"expected 18 Shadowrocket rule mirrors, got {sr_count}")
-    if mihomo_count != 16:
-        raise SystemExit(f"expected 16 Mihomo rule mirrors, got {mihomo_count}")
+    if not DEFAULT_AI_ROUTING_SCHEMA.exists():
+        raise SystemExit(f"missing AI routing contract schema: {DEFAULT_AI_ROUTING_SCHEMA}")
+    registry = rule_registry(registry_path, contract_path)
+    derived = derived_registry_counts(registry)
+    clients = derived["clients"]
+    assert isinstance(clients, dict)
+    if not clients.get("shadowrocket") or not clients.get("mihomo"):
+        raise SystemExit("active registry must include Shadowrocket and Mihomo rule mirrors")
     rewritten = rewrite_rule_urls(shadowrocket_conf.read_text(encoding="utf-8"), rule_mirror_url_map(env, registry))
     third_party_sr = re.findall(r"(?m)^(?:RULE-SET|DOMAIN-SET),https://(?:cdn\.jsdelivr\.net|github\.com)/", rewritten)
     if third_party_sr:
@@ -846,6 +844,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--shadowrocket-conf", default=str(DEFAULT_SHADOWROCKET_CONF))
     parser.add_argument("--rule-registry", default=str(DEFAULT_RULE_REGISTRY))
     parser.add_argument("--rule-mirror", default=str(DEFAULT_RULE_MIRROR))
+    parser.add_argument("--ai-routing-contract", default=str(DEFAULT_AI_ROUTING_CONTRACT))
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--strict", action="store_true", help="reject placeholder values")
     args = parser.parse_args(argv)
@@ -855,6 +854,7 @@ def main(argv: list[str]) -> int:
         env,
         allow_placeholders=not args.strict,
         registry_path=Path(args.rule_registry),
+        contract_path=Path(args.ai_routing_contract),
         shadowrocket_conf=Path(args.shadowrocket_conf),
     )
     if args.check:
